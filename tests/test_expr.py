@@ -77,7 +77,7 @@ def test_warnings_not_duplicated():
     "",
     'like(ip, "10.%")',          # function
     "isnull(user)",
-    "a+b > 5",                   # arithmetic
+    "a % b > 5",                 # modulo not supported (a+b > 5 is: see test_eval)
     "n > -1",                    # negative numbers unsupported
     "a=1 XOR b=2",
     "a=1 and b=2",               # lowercase boolean words: ambiguous
