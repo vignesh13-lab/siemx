@@ -20,14 +20,15 @@ from siemx import rules
     ("fields host", "project host", "fields host"),
     # head
     ("head 10", "take 10", "limit 10"),
-    # stats count
-    ("stats count", "summarize count()", "comp count() as count"),
-    ("stats count by host", "summarize count() by host", "comp count() as count by host"),
-    ("stats count by host, user", "summarize count() by host, user",
+    # stats count: output column must be named `count`, as in SPL
+    ("stats count", "summarize ['count'] = count()", "comp count() as count"),
+    ("stats count by host", "summarize ['count'] = count() by host",
+     "comp count() as count by host"),
+    ("stats count by host, user", "summarize ['count'] = count() by host, user",
      "comp count() as count by host, user"),
-    # sort (single field)
-    ("sort - count", "sort by count desc", "sort desc count"),
-    ("sort -count", "sort by count desc", "sort desc count"),
+    # sort (single field); `count` is a KQL keyword -> quoted
+    ("sort - count", "sort by ['count'] desc", "sort desc count"),
+    ("sort -count", "sort by ['count'] desc", "sort desc count"),
     ("sort + host", "sort by host asc", "sort asc host"),
     ("sort host", "sort by host asc", "sort asc host"),
 ])
@@ -53,6 +54,28 @@ def test_stage_without_rule_returns_none(spl):
     """No rule -> None so the pipeline falls back to the LLM, never a guess."""
     assert rules.stage(spl, "kql") is None
     assert rules.stage(spl, "xql") is None
+
+
+@pytest.mark.parametrize("name, quoted", [
+    ("host", "host"),
+    ("_time", "_time"),
+    ("EventID2", "EventID2"),
+    ("count", "['count']"),
+    ("Count", "['Count']"),       # keyword check is case-insensitive (conservative)
+    ("where", "['where']"),
+    ("user-name", "['user-name']"),
+    ("src.ip", "['src.ip']"),
+    ("1day", "['1day']"),
+    ("o'brien", "['o\\'brien']"),
+])
+def test_kql_name(name, quoted):
+    assert rules.kql_name(name) == quoted
+
+
+def test_kql_names_quoted_in_project_and_by():
+    assert rules.stage("table count, host", "kql") == "project ['count'], host"
+    assert rules.stage("stats count by where", "kql") == "summarize ['count'] = count() by ['where']"
+    assert rules.stage("table count, host", "xql") == "fields count, host"
 
 
 def test_first_stage_maps_known_source(sources_map):
