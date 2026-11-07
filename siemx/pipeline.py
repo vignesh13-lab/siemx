@@ -21,7 +21,8 @@ def convert_query(spl: str, target: str) -> dict:
         q = "\n| ".join(parts)
         # rules.Flagged parts carry warnings -> status_for() marks needs-review
         warnings = [w for part in parts for w in getattr(part, "warnings", [])]
-        warnings += schema.check(parts, target)   # unknown field names -> review
+        warnings += schema.check(parts, target)        # unknown field names -> review
+        warnings += schema.order_check(parts, target)  # order-dependent stages -> review
         return {"query": q, "confidence": 0.9, "method": "rules", "warnings": warnings, "tokens": 0}
     # 2) LLM + RAG fallback with validation retry
     out = llm.translate(spl, target)

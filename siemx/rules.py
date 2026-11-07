@@ -16,6 +16,12 @@ Doc references:
   KQL project-rename: https://learn.microsoft.com/en-us/kusto/query/project-rename-operator
   XQL alter:        https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/alter.md
   XQL fields:       https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/fields.md
+  SPL dedup:        https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/9.4/search-commands/dedup
+  KQL arg_max():    https://learn.microsoft.com/en-us/kusto/query/arg-max-aggregation-function
+  KQL isnotempty(): https://learn.microsoft.com/en-us/kusto/query/isnotempty-function
+  XQL dedup:        https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/dedup.md
+  KQL take order:   https://learn.microsoft.com/en-us/kusto/query/take-operator
+  XQL limit order:  https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/limit.md
 """
 import json
 import re
@@ -32,14 +38,19 @@ class Out(str):
       reads   - field names the stage references
       only    - the stage outputs only these fields (table, stats)
       add / drop - fields created / removed (rename)
+    and, for the order check, how it affects row order:
+      order   - "sorts" (sort), "loses" (stats, dedup: target output order is
+                not guaranteed), "takes_first" (head: picks the first N rows),
+                "keeps_first" (dedup: SPL keeps the first row in current order)
     """
     warnings: list[str] = []
 
-    def __new__(cls, text: str, *, reads=(), only=None, add=(), drop=()):
+    def __new__(cls, text: str, *, reads=(), only=None, add=(), drop=(), order=()):
         obj = super().__new__(cls, text)
         obj.reads = list(reads)
         obj.only = None if only is None else list(only)
         obj.add, obj.drop = list(add), list(drop)
+        obj.order = set([order] if isinstance(order, str) else order)
         return obj
 
 
@@ -113,11 +124,14 @@ def stage(stage_text: str, target: str):
         reads = expr.fields_in(expr.parse(arg))
         return Flagged(text, r.warnings, reads=reads) if r.warnings else Out(text, reads=reads)
 
+    if cmd == "dedup":
+        return _dedup(arg, target)
+
     if cmd == "rename":
         return _rename(arg, target)
 
     if cmd == "head" and arg.isdigit():
-        return f"take {arg}" if target == "kql" else f"limit {arg}"
+        return Out(f"take {arg}" if target == "kql" else f"limit {arg}", order="takes_first")
 
     # SPL `stats count` outputs a column named `count`. Name it explicitly so
     # later stages (e.g. `sort - count`) can reference it:
@@ -127,7 +141,7 @@ def stage(stage_text: str, target: str):
     if m:
         by_fields = _fields(m.group(1)) if m.group(1) else []
         by = f" by {_names(by_fields, target)}" if by_fields else ""
-        fx = dict(reads=by_fields, only=["count", *by_fields])
+        fx = dict(reads=by_fields, only=["count", *by_fields], order="loses")
         if target == "kql":
             return Out(f"summarize {kql_name('count')} = count(){by}", **fx)
         return Out(f"comp count() as count{by}", **fx)
@@ -136,8 +150,8 @@ def stage(stage_text: str, target: str):
     if m:
         desc, f = m.group(1) == "-", m.group(2)
         if target == "kql":
-            return Out(f"sort by {kql_name(f)} {'desc' if desc else 'asc'}", reads=[f])
-        return Out(f"sort {'desc' if desc else 'asc'} {f}", reads=[f])
+            return Out(f"sort by {kql_name(f)} {'desc' if desc else 'asc'}", reads=[f], order="sorts")
+        return Out(f"sort {'desc' if desc else 'asc'} {f}", reads=[f], order="sorts")
 
     return None
 
@@ -189,3 +203,36 @@ def _rename(arg: str, target: str):
     alter = "alter " + ", ".join(f"{n} = {o}" for o, n in pairs)
     drop = "fields - " + ", ".join(o for o, _ in pairs)
     return Flagged(f"{alter}\n| {drop}", [XQL_RENAME_WARNING], **fx)
+
+
+# ---- dedup --------------------------------------------------------------------
+# SPL `dedup f1 f2` keeps the first event per combination in search order (most
+# recent first by default) and drops events where any of the fields is null.
+#   KQL: no dedup operator. Filter empty values, then keep the latest row per
+#        group with all columns: summarize arg_max(TimeGenerated, *) by f1, f2.
+#   XQL: `dedup` keeps an ARBITRARY record unless `by asc|desc <field>` is given,
+#        so `by desc _time` is required. Null handling and whether all fields are
+#        kept are not documented -> flagged.
+
+XQL_DEDUP_WARNING = ("XQL dedup: null handling and whether all fields are kept are not "
+                     "documented; verify")
+_DEDUP_FIELD = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*")
+
+
+def _dedup(arg: str, target: str):
+    fields = _fields(arg)
+    if not fields or not all(_DEDUP_FIELD.fullmatch(f) for f in fields):
+        return None          # count form, options (x=y), sortby, quoted names
+    if "sortby" in fields or len(set(fields)) != len(fields):
+        return None
+    if target == "kql":
+        notempty = " and ".join(f"isnotempty({kql_name(f)})" for f in fields)
+        text = (f"where {notempty}\n"
+                f"| summarize arg_max(TimeGenerated, *) by {_names(fields, target)}")
+        return Out(text, reads=[*fields, "TimeGenerated"], order={"keeps_first", "loses"})
+    if not all(_XQL_IDENT.fullmatch(f) for f in fields):
+        return None
+    notnull = " and ".join(f"{f} != null" for f in fields)
+    text = f"filter {notnull}\n| dedup {', '.join(fields)} by desc _time"
+    return Flagged(text, [XQL_DEDUP_WARNING], reads=[*fields, "_time"],
+                   order={"keeps_first", "loses"})
