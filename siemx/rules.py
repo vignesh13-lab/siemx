@@ -25,12 +25,30 @@ from .config import MAP_FILE
 from .triage import command_of
 
 
-class Flagged(str):
-    """Rule output that is usable but must be reviewed by a human.
-    Behaves as a str; the pipeline reads .warnings and marks needs-review."""
+class Out(str):
+    """Rule output. Behaves as the query text (a str) and also records, for the
+    pipeline's field check (schema.py), which input fields the stage reads and
+    how it changes the set of available fields:
+      reads   - field names the stage references
+      only    - the stage outputs only these fields (table, stats)
+      add / drop - fields created / removed (rename)
+    """
+    warnings: list[str] = []
 
-    def __new__(cls, text: str, warnings: list[str]):
+    def __new__(cls, text: str, *, reads=(), only=None, add=(), drop=()):
         obj = super().__new__(cls, text)
+        obj.reads = list(reads)
+        obj.only = None if only is None else list(only)
+        obj.add, obj.drop = list(add), list(drop)
+        return obj
+
+
+class Flagged(Out):
+    """Rule output that is usable but must be reviewed by a human.
+    The pipeline reads .warnings and marks needs-review."""
+
+    def __new__(cls, text: str, warnings: list[str], **effects):
+        obj = super().__new__(cls, text, **effects)
         obj.warnings = list(warnings)
         return obj
 
@@ -82,8 +100,9 @@ def stage(stage_text: str, target: str):
     arg = stage_text.strip()[len(cmd):].strip()
 
     if cmd in ("table", "fields") and "-" not in arg:
-        f = _names(_fields(arg), target)
-        return f"project {f}" if target == "kql" else f"fields {f}"
+        fl = _fields(arg)
+        f = _names(fl, target)
+        return Out(f"project {f}" if target == "kql" else f"fields {f}", reads=fl, only=fl)
 
     # SPL where -> KQL where / XQL filter (simple comparisons only; see expr.py)
     if cmd == "where" and arg:
@@ -91,7 +110,8 @@ def stage(stage_text: str, target: str):
         if r is None:
             return None
         text = f"where {r.text}" if target == "kql" else f"filter {r.text}"
-        return Flagged(text, r.warnings) if r.warnings else text
+        reads = expr.fields_in(expr.parse(arg))
+        return Flagged(text, r.warnings, reads=reads) if r.warnings else Out(text, reads=reads)
 
     if cmd == "rename":
         return _rename(arg, target)
@@ -107,16 +127,17 @@ def stage(stage_text: str, target: str):
     if m:
         by_fields = _fields(m.group(1)) if m.group(1) else []
         by = f" by {_names(by_fields, target)}" if by_fields else ""
+        fx = dict(reads=by_fields, only=["count", *by_fields])
         if target == "kql":
-            return f"summarize {kql_name('count')} = count(){by}"
-        return f"comp count() as count{by}"
+            return Out(f"summarize {kql_name('count')} = count(){by}", **fx)
+        return Out(f"comp count() as count{by}", **fx)
 
     m = re.fullmatch(r"([-+])?\s*(\w+)", arg) if cmd == "sort" else None
     if m:
-        desc = m.group(1) == "-"
+        desc, f = m.group(1) == "-", m.group(2)
         if target == "kql":
-            return f"sort by {kql_name(m.group(2))} {'desc' if desc else 'asc'}"
-        return f"sort {'desc' if desc else 'asc'} {m.group(2)}"
+            return Out(f"sort by {kql_name(f)} {'desc' if desc else 'asc'}", reads=[f])
+        return Out(f"sort {'desc' if desc else 'asc'} {f}", reads=[f])
 
     return None
 
@@ -158,10 +179,13 @@ def _rename(arg: str, target: str):
     pairs = parse_rename(arg)
     if pairs is None:
         return None
+    olds, news = [o for o, _ in pairs], [n for _, n in pairs]
+    fx = dict(reads=olds, drop=olds, add=news)
     if target == "kql":
-        return "project-rename " + ", ".join(f"{kql_name(n)} = {kql_name(o)}" for o, n in pairs)
+        return Out("project-rename " + ", ".join(f"{kql_name(n)} = {kql_name(o)}"
+                                                 for o, n in pairs), **fx)
     if not all(_XQL_IDENT.fullmatch(x) for pair in pairs for x in pair):
         return None                      # XQL quoting of special names not verified
     alter = "alter " + ", ".join(f"{n} = {o}" for o, n in pairs)
     drop = "fields - " + ", ".join(o for o, _ in pairs)
-    return Flagged(f"{alter}\n| {drop}", [XQL_RENAME_WARNING])
+    return Flagged(f"{alter}\n| {drop}", [XQL_RENAME_WARNING], **fx)

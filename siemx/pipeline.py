@@ -4,7 +4,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from . import config, llm, rules, triage, validate
+from . import config, llm, rules, schema, triage, validate
 
 
 def sha(text: str) -> str:
@@ -21,6 +21,7 @@ def convert_query(spl: str, target: str) -> dict:
         q = "\n| ".join(parts)
         # rules.Flagged parts carry warnings -> status_for() marks needs-review
         warnings = [w for part in parts for w in getattr(part, "warnings", [])]
+        warnings += schema.check(parts, target)   # unknown field names -> review
         return {"query": q, "confidence": 0.9, "method": "rules", "warnings": warnings, "tokens": 0}
     # 2) LLM + RAG fallback with validation retry
     out = llm.translate(spl, target)

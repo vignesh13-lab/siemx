@@ -8,6 +8,23 @@ from siemx import config, llm, rules
 
 SOURCES = {"index=wineventlog": {"kql": "SecurityEvent", "xql": "dataset = xdr_data"}}
 
+# Test-only schema (the real one is mappings/fields.json). Includes `host` and
+# `user` so pipeline-mechanics tests are not affected by the field check;
+# tests/test_schema.py covers the check itself.
+TEST_FIELDS = {
+    "kql": {"SecurityEvent": {"fields": ["Computer", "EventID", "host", "user"]}},
+    "xql": {"xdr_data": {"fields": ["agent_hostname", "host", "user"]}},
+}
+
+
+@pytest.fixture(autouse=True)
+def fields_map(tmp_path, monkeypatch):
+    """Never read the repo's mappings/fields.json implicitly (cwd-dependent)."""
+    f = tmp_path / "fields.json"
+    f.write_text(json.dumps(TEST_FIELDS))
+    monkeypatch.setattr(config, "FIELDS_FILE", f)
+    return f
+
 
 @pytest.fixture
 def sources_map(tmp_path, monkeypatch):
