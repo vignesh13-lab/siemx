@@ -1,0 +1,37 @@
+name: convert-detections
+on:
+  push:
+    branches: [main]
+    paths: ["detections/spl/**", "mappings/**", "gold/**"]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 0"   # weekly full recheck after docs/model changes
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e .
+      - name: Convert (unchanged files are skipped by hash)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: siemx convert --workers 4 | tee run.jsonl
+      - name: Summary
+        run: |
+          echo "### siemx status" >> "$GITHUB_STEP_SUMMARY"
+          siemx status >> "$GITHUB_STEP_SUMMARY"
+      - name: Open PR with converted queries
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: bot/siemx-conversions
+          title: "siemx: converted detections"
+          commit-message: "siemx: update converted queries"
+          body: "Auto-converted. Review items marked needs-review/unsupported (run `siemx review`)."
+          add-paths: converted/**

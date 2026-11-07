@@ -1,0 +1,15 @@
+[project]
+name = "siemx"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["anthropic"]   # add chromadb later for RAG retrieval
+
+[project.scripts]
+siemx = "siemx.cli:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["siemx"]

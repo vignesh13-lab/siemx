@@ -1,0 +1,1 @@
+index=wineventlog | stats count by host | sort - count | head 10

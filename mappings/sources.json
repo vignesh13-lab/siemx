@@ -1,0 +1,3 @@
+{
+  "index=wineventlog": {"kql": "SecurityEvent", "xql": "dataset = xdr_data"}
+}
