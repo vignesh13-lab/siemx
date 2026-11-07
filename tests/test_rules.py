@@ -1,0 +1,79 @@
+"""Starter-rule tests. Each case: SPL stage -> expected KQL and XQL.
+
+These pin current behaviour; they do not prove the mappings are correct.
+Doc references for the expected output (verify before relying on a rule):
+  KQL project:   https://learn.microsoft.com/kusto/query/project-operator
+  KQL take:      https://learn.microsoft.com/kusto/query/take-operator
+  KQL summarize: https://learn.microsoft.com/kusto/query/summarize-operator
+  KQL sort:      https://learn.microsoft.com/kusto/query/sort-operator
+  XQL fields / limit / comp / sort: Cortex XQL reference, "Stages"
+"""
+import pytest
+
+from siemx import rules
+
+
+@pytest.mark.parametrize("spl, kql, xql", [
+    # table / fields
+    ("table host user", "project host, user", "fields host, user"),
+    ("table host, user", "project host, user", "fields host, user"),
+    ("fields host", "project host", "fields host"),
+    # head
+    ("head 10", "take 10", "limit 10"),
+    # stats count
+    ("stats count", "summarize count()", "comp count() as count"),
+    ("stats count by host", "summarize count() by host", "comp count() as count by host"),
+    ("stats count by host, user", "summarize count() by host, user",
+     "comp count() as count by host, user"),
+    # sort (single field)
+    ("sort - count", "sort by count desc", "sort desc count"),
+    ("sort -count", "sort by count desc", "sort desc count"),
+    ("sort + host", "sort by host asc", "sort asc host"),
+    ("sort host", "sort by host asc", "sort asc host"),
+])
+def test_stage_rule(spl, kql, xql):
+    assert rules.stage(spl, "kql") == kql
+    assert rules.stage(spl, "xql") == xql
+
+
+@pytest.mark.parametrize("spl", [
+    "fields - host",                 # field removal: different semantics
+    "head",                          # bare head (SPL default 10) not mapped yet
+    "head count>5",                  # eval-expression form
+    "stats count(user) by host",     # field-level count
+    "stats dc(user) by host",
+    "stats count as n by host",      # rename in stats
+    "sort - count, host",            # multi-field sort
+    "sort 100 -count",               # sort with limit
+    'rex field=_raw "(?<u>\\w+)"',
+    "transaction host",
+    "unknowncmd foo",
+])
+def test_stage_without_rule_returns_none(spl):
+    """No rule -> None so the pipeline falls back to the LLM, never a guess."""
+    assert rules.stage(spl, "kql") is None
+    assert rules.stage(spl, "xql") is None
+
+
+def test_first_stage_maps_known_source(sources_map):
+    assert rules.first_stage("index=wineventlog", "kql") == "SecurityEvent"
+    assert rules.first_stage("index=wineventlog", "xql") == "dataset = xdr_data"
+    assert rules.first_stage("INDEX=WinEventLog", "kql") == "SecurityEvent"
+
+
+@pytest.mark.parametrize("stage", [
+    "index=wineventlog EventCode=4625",   # leftover terms need translation
+    "index=unknown",
+    "search index=wineventlog",
+])
+def test_first_stage_unmapped_returns_none(sources_map, stage):
+    assert rules.first_stage(stage, "kql") is None
+
+
+def test_first_stage_unknown_target(sources_map):
+    assert rules.first_stage("index=wineventlog", "esql") is None
+
+
+def test_first_stage_missing_mapping_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(rules, "MAP_FILE", tmp_path / "nope.json")
+    assert rules.first_stage("index=wineventlog", "kql") is None
