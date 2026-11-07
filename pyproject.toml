@@ -4,6 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = ["anthropic"]   # add chromadb later for RAG retrieval
 
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
 [project.scripts]
 siemx = "siemx.cli:main"
 
@@ -13,3 +16,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["siemx"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
