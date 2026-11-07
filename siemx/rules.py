@@ -30,6 +30,9 @@ Doc references:
   KQL regex:        https://learn.microsoft.com/en-us/kusto/query/regex
   KQL strings:      https://learn.microsoft.com/en-us/kusto/query/scalar-data-types/string
   XQL regextract(): https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/functions/regextract.md
+  SPL timechart:    https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/9.4/search-commands/timechart
+  KQL bin():        https://learn.microsoft.com/en-us/kusto/query/bin-function
+  XQL bin:          https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/bin.md
   XQL limit order:  https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/limit.md
 """
 import json
@@ -141,6 +144,9 @@ def stage(stage_text: str, target: str):
 
     if cmd == "rex":
         return _rex(arg, target)
+
+    if cmd == "timechart":
+        return _timechart(arg, target)
 
     if cmd == "dedup":
         return _dedup(arg, target)
@@ -517,3 +523,67 @@ def _rex(arg: str, target: str):
     parts = [f'{n} = regextract({src}, "{_rex_rewrite(pattern, groups, keep=i)}")'
              for i, n in named]
     return Flagged("alter " + ", ".join(parts), [XQL_REX_WARNING], **fx)
+
+
+# ---- timechart --------------------------------------------------------------------
+# SPL `timechart span=<n><unit> count`: event count per time bucket, columns
+# _time and count. cont=true (default) fills empty buckets; bins start at
+# epoch-aligned boundaries, but day bins "may not match your local timezone".
+#   KQL: summarize count by _time = bin(TimeGenerated, <span>) | sort by _time
+#        asc. Empty bins are not produced (bin() docs pad them with union/range).
+#   XQL: bin _time span = <span> | comp count() as count by _time | sort asc
+#        _time. Empty bins and default alignment are not documented.
+# Only spans that divide a day (s/m/h) or exactly 1d, so bucket boundaries do
+# not depend on the engine's epoch. No span (depends on the time range), by
+# (one column per value + OTHER/NULL), other aggregations -> None.
+
+TC_FILL_WARNING = ("{T}: SPL timechart fills empty time buckets (cont=true); this output "
+                   "omits them. Verify, or add cont=false to the SPL if gaps do not matter")
+TC_DAY_WARNING = ("{T}: span=1d buckets are UTC here; SPL day buckets may follow the "
+                  "user's timezone; verify")
+XQL_TC_ALIGN_WARNING = ("XQL: default bin alignment is not documented (no timeshift/timezone "
+                        "given); verify bucket boundaries")
+_SPAN_UNITS = {"s": 1, "sec": 1, "secs": 1, "second": 1, "seconds": 1,
+               "m": 60, "min": 60, "mins": 60, "minute": 60, "minutes": 60,
+               "h": 3600, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600,
+               "d": 86400, "day": 86400, "days": 86400}
+_SPAN_SUFFIX = {1: "s", 60: "m", 3600: "h", 86400: "d"}
+
+
+def _timechart(arg: str, target: str):
+    opts, rest = {}, []
+    for tok in arg.split():
+        m = re.fullmatch(r"(span|cont)=(\S+)", tok)
+        if m:
+            opts[m.group(1)] = m.group(2).lower()
+        else:
+            rest.append(tok)
+    if rest != ["count"] or "span" not in opts:
+        return None                    # by-clause, other aggregations, options, no span
+    m = re.fullmatch(r"(\d+)([a-z]+)", opts["span"])
+    if not m or m.group(2) not in _SPAN_UNITS or int(m.group(1)) == 0:
+        return None
+    n, unit = int(m.group(1)), _SPAN_UNITS[m.group(2)]
+    seconds = n * unit
+    if unit == 86400 and n != 1:
+        return None                    # multi-day bins: epoch alignment differs
+    if unit < 86400 and 86400 % seconds:
+        return None                    # bins that do not divide a day
+    cont = opts.get("cont", "true")
+    if cont not in _TRUE | _FALSE:
+        return None
+    span = f"{n}{_SPAN_SUFFIX[unit]}"
+    T = target.upper()
+    warnings = [TC_FILL_WARNING.format(T=T)] if cont in _TRUE else []
+    if unit == 86400:
+        warnings.append(TC_DAY_WARNING.format(T=T))
+    if target == "kql":
+        text = (f"summarize {kql_name('count')} = count() by _time = bin(TimeGenerated, {span})\n"
+                "| sort by _time asc")
+        reads = ["TimeGenerated"]
+    else:
+        warnings.append(XQL_TC_ALIGN_WARNING)
+        text = f"bin _time span = {span}\n| comp count() as count by _time\n| sort asc _time"
+        reads = ["_time"]
+    fx = dict(reads=reads, only=["_time", "count"], order="sorts")
+    return Flagged(text, warnings, **fx) if warnings else Out(text, **fx)
