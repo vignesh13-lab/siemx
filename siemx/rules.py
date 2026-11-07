@@ -11,12 +11,24 @@ Doc references:
   XQL comp:         https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/comp.md
   XQL count():      https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/functions/count_with_comp_stage.md
   XQL sort:         https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/sort.md
+  SPL/KQL/XQL where/filter: see expr.py
 """
 import json
 import re
 
+from . import expr
 from .config import MAP_FILE
 from .triage import command_of
+
+
+class Flagged(str):
+    """Rule output that is usable but must be reviewed by a human.
+    Behaves as a str; the pipeline reads .warnings and marks needs-review."""
+
+    def __new__(cls, text: str, warnings: list[str]):
+        obj = super().__new__(cls, text)
+        obj.warnings = list(warnings)
+        return obj
 
 # KQL identifiers that are language keywords "must be enclosed using [' and ']"
 # (entity-names page). The docs give no complete list, so this set is
@@ -68,6 +80,14 @@ def stage(stage_text: str, target: str):
     if cmd in ("table", "fields") and "-" not in arg:
         f = _names(_fields(arg), target)
         return f"project {f}" if target == "kql" else f"fields {f}"
+
+    # SPL where -> KQL where / XQL filter (simple comparisons only; see expr.py)
+    if cmd == "where" and arg:
+        r = expr.translate(arg, target)
+        if r is None:
+            return None
+        text = f"where {r.text}" if target == "kql" else f"filter {r.text}"
+        return Flagged(text, r.warnings) if r.warnings else text
 
     if cmd == "head" and arg.isdigit():
         return f"take {arg}" if target == "kql" else f"limit {arg}"

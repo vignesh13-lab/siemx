@@ -17,8 +17,11 @@ def convert_query(spl: str, target: str) -> dict:
     head = rules.first_stage(stages[0], target)
     rest = [rules.stage(s, target) for s in stages[1:]]
     if head and all(r is not None for r in rest):
-        q = "\n| ".join([head] + rest)
-        return {"query": q, "confidence": 0.9, "method": "rules", "warnings": [], "tokens": 0}
+        parts = [head] + rest
+        q = "\n| ".join(parts)
+        # rules.Flagged parts carry warnings -> status_for() marks needs-review
+        warnings = [w for part in parts for w in getattr(part, "warnings", [])]
+        return {"query": q, "confidence": 0.9, "method": "rules", "warnings": warnings, "tokens": 0}
     # 2) LLM + RAG fallback with validation retry
     out = llm.translate(spl, target)
     out["method"] = "llm"

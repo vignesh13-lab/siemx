@@ -56,6 +56,26 @@ def test_stage_without_rule_returns_none(spl):
     assert rules.stage(spl, "xql") is None
 
 
+def test_where_rule():
+    assert rules.stage("where count > 5", "kql") == "where ['count'] > 5"
+    assert rules.stage("where count > 5", "xql") == "filter count > 5"
+    assert not isinstance(rules.stage("where count > 5", "kql"), rules.Flagged)
+
+
+def test_where_rule_flags_review_items():
+    r = rules.stage('where user="admin"', "xql")
+    assert isinstance(r, rules.Flagged) and r == 'filter user = "admin"'
+    assert r.warnings
+    r = rules.stage("where n != 1", "kql")
+    assert isinstance(r, rules.Flagged) and r == "where n != 1"
+
+
+@pytest.mark.parametrize("spl", ["where", 'where like(ip, "10.%")', "where a=1 b=2"])
+def test_where_rule_unsupported(spl):
+    assert rules.stage(spl, "kql") is None
+    assert rules.stage(spl, "xql") is None
+
+
 @pytest.mark.parametrize("name, quoted", [
     ("host", "host"),
     ("_time", "_time"),
