@@ -25,6 +25,11 @@ Doc references:
   SPL top:          https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/9.4/search-commands/top
   KQL top:          https://learn.microsoft.com/en-us/kusto/query/top-operator
   XQL top:          https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/top.md
+  SPL rex:          https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/9.4/search-commands/rex
+  KQL extract():    https://learn.microsoft.com/en-us/kusto/query/extract-function
+  KQL regex:        https://learn.microsoft.com/en-us/kusto/query/regex
+  KQL strings:      https://learn.microsoft.com/en-us/kusto/query/scalar-data-types/string
+  XQL regextract(): https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/functions/regextract.md
   XQL limit order:  https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/limit.md
 """
 import json
@@ -72,10 +77,10 @@ class Flagged(Out):
 # conservative: operator names and common keywords. Over-quoting is valid KQL.
 KQL_KEYWORDS = {
     "and", "as", "asc", "between", "by", "contains", "count", "desc", "distinct",
-    "evaluate", "extend", "false", "find", "has", "in", "invoke", "join", "kind",
+    "evaluate", "extend", "false", "find", "from", "has", "in", "invoke", "join", "kind",
     "let", "limit", "lookup", "not", "null", "of", "on", "or", "order", "parse",
     "print", "project", "range", "render", "sample", "search", "serialize", "sort",
-    "summarize", "take", "top", "true", "typeof", "union", "where", "with",
+    "step", "summarize", "take", "to", "top", "true", "typeof", "union", "where", "with",
 }
 _PLAIN_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -133,6 +138,9 @@ def stage(stage_text: str, target: str):
 
     if cmd == "top":
         return _top(arg, target)
+
+    if cmd == "rex":
+        return _rex(arg, target)
 
     if cmd == "dedup":
         return _dedup(arg, target)
@@ -407,3 +415,105 @@ def _top(arg: str, target: str):
     if showperc:
         return Flagged(text, [TOP_PERCENT_WARNING.format(T=target.upper())], **fx)
     return Out(text, **fx)
+
+
+# ---- rex ------------------------------------------------------------------------
+# SPL `rex field=<f> "<PCRE with (?<name>...)>"` extracts named groups into fields
+# (default field _raw, max_match 1). No-match behaviour is not documented.
+#   KQL: extend name = extract(@"<regex>", <group index>, f); null on no match.
+#        KQL regex has (?<name>) groups but no lookaround / backreferences.
+#        Verbatim @"..." keeps backslashes; a " is written "".
+#        Note: KQL \d \w are Unicode-aware (PCRE default is ASCII); only matters
+#        for non-ASCII text, not flagged.
+#   XQL: alter name = regextract(f, "<regex>"): returns the FIRST capture group,
+#        NULL on no match. Each named group gets its own regextract with the
+#        other groups made non-capturing. Regex dialect is not stated on that
+#        page (RE2 per the regexcapture page) -> flagged. regexcapture() itself
+#        only works in parsing rules, so it is not used.
+# _raw (no equivalent in Sentinel tables), sed mode, max_match != 1,
+# offset_field and PCRE-only syntax -> None.
+
+XQL_REX_WARNING = ("XQL: regextract regex dialect is not stated in its docs (RE2 assumed); "
+                   "verify the pattern")
+_REX_UNSUPPORTED = re.compile(
+    r"\(\?[=!>|R(]|\(\?<[=!]|\(\?\d|\\[1-9gkKGZhHRXC]|[*+?}][+]|\\Q|\\E")
+_REX_OPTION = re.compile(r'\s*(field|max_match)=("[^"]*"|\S+)')
+
+
+def _rex_groups(pattern: str) -> list[tuple[int, int, str | None]] | None:
+    """Capturing groups as (start, end_of_opening, name) in order; None if unparsable."""
+    groups, i, in_class = [], 0, False
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if in_class:
+            if ch == "]":
+                in_class = False
+        elif ch == "[":
+            in_class = True
+            if pattern[i + 1:i + 2] == "]":       # literal ] first in a class
+                i += 1
+        elif ch == "(":
+            m = re.match(r"\(\?P?<([A-Za-z_][A-Za-z0-9_]*)>", pattern[i:])
+            if m:
+                groups.append((i, i + m.end(), m.group(1)))
+            elif pattern[i + 1:i + 2] == "?":
+                pass                              # non-capturing / flags
+            else:
+                groups.append((i, i + 1, None))
+        i += 1
+    return None if in_class else groups
+
+
+def _rex_rewrite(pattern: str, groups, keep: int | None = None) -> str:
+    """Strip group names; if keep is set, only group #keep (0-based) stays capturing."""
+    out, last = [], 0
+    for idx, (start, end, _) in enumerate(groups):
+        out.append(pattern[last:start])
+        out.append("(" if keep is None or idx == keep else "(?:")
+        last = end
+    out.append(pattern[last:])
+    return "".join(out)
+
+
+def _rex(arg: str, target: str):
+    opts, rest = {}, arg
+    while True:
+        m = _REX_OPTION.match(rest)
+        if not m:
+            break
+        opts[m.group(1)] = m.group(2).strip('"')
+        rest = rest[m.end():]
+    m = re.fullmatch(r'\s*"((?:[^"\\]|\\.)*)"\s*', rest)
+    if not m or opts.get("max_match", "1") != "1":
+        return None                    # sed mode, offset_field, unquoted, multi-match
+    src = opts.get("field", "_raw")
+    if src == "_raw" or not _PLAIN_IDENT.fullmatch(src):
+        return None                    # no _raw equivalent in Sentinel / XQL datasets
+    raw = m.group(1)
+    if "\\\\" in raw:
+        return None                    # SPL backslash-escaping of the regex is ambiguous
+    pattern = raw.replace('\\"', '"')
+    if _REX_UNSUPPORTED.search(pattern):
+        return None                    # PCRE-only: lookaround, backrefs, atomic, ...
+    groups = _rex_groups(pattern)
+    if not groups:
+        return None
+    named = [(i, g[2]) for i, g in enumerate(groups) if g[2]]
+    names = [n for _, n in named]
+    if not named or len(set(names)) != len(names):
+        return None
+    if src in names and len(names) > 1:
+        return None                    # source overwritten while still being read
+    fx = dict(reads=[src], add=names)
+    if target == "kql":
+        regex = '@"' + _rex_rewrite(pattern, groups).replace('"', '""') + '"'
+        parts = [f"{kql_name(n)} = extract({regex}, {i + 1}, {kql_name(src)})" for i, n in named]
+        return Out("extend " + ", ".join(parts), **fx)
+    if '"' in pattern or not all(_XQL_IDENT.fullmatch(n) for n in names):
+        return None
+    parts = [f'{n} = regextract({src}, "{_rex_rewrite(pattern, groups, keep=i)}")'
+             for i, n in named]
+    return Flagged("alter " + ", ".join(parts), [XQL_REX_WARNING], **fx)
