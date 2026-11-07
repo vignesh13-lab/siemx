@@ -33,6 +33,10 @@ Doc references:
   SPL timechart:    https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/9.4/search-commands/timechart
   KQL bin():        https://learn.microsoft.com/en-us/kusto/query/bin-function
   XQL bin:          https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/bin.md
+  SPL lookup:       https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/9.4/search-commands/lookup
+  KQL lookup:       https://learn.microsoft.com/en-us/kusto/query/lookup-operator
+  Sentinel watchlists: https://learn.microsoft.com/en-us/azure/sentinel/watchlists-queries
+  XQL join:         https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/join.md
   XQL limit order:  https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/limit.md
 """
 import json
@@ -147,6 +151,9 @@ def stage(stage_text: str, target: str):
 
     if cmd == "timechart":
         return _timechart(arg, target)
+
+    if cmd == "lookup":
+        return _lookup(arg, target)
 
     if cmd == "dedup":
         return _dedup(arg, target)
@@ -587,3 +594,101 @@ def _timechart(arg: str, target: str):
         reads = ["_time"]
     fx = dict(reads=reads, only=["_time", "count"], order="sorts")
     return Flagged(text, warnings, **fx) if warnings else Out(text, **fx)
+
+
+# ---- lookup -----------------------------------------------------------------------
+# SPL `lookup <table> <lfield> [AS <efield>] ... OUTPUT <dest> [AS <edest>] ...`.
+# OUTPUT overwrites existing fields; OUTPUTNEW only fills missing ones. No-match
+# and multiple-match behaviour are not documented. ALWAYS flagged: the lookup
+# table must exist on the target side and lookup options are not carried over.
+#   KQL: lookup kind=leftouter (_GetWatchlist('<alias>') | project ...)
+#        on $left.<efield> == $right.<lfield>   (Sentinel watchlists docs).
+#        Columns already present on the left are renamed, not overwritten.
+#   XQL: join type = left (dataset = <name> | fields ...) as lk <condition>.
+#        conflict_strategy defaults to right (lookup value wins, like OUTPUT).
+#        Keys are aliased inside the subquery so a same-named event field is
+#        not overwritten with NULL on no match, then removed with `fields -`.
+# OUTPUTNEW, no OUTPUT list (unknown columns), options -> None.
+
+LOOKUP_WARNING = (
+    "{T}: lookup '{table}' must exist as {where} '{alias}' with columns {cols}. Splunk "
+    "lookup settings (case sensitivity, match type such as CIDR, max matches) are not "
+    "carried over; several matching rows give several result rows; {conflict}. Verify")
+_LOOKUP_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def parse_lookup(arg: str):
+    """-> (table, [(lookup_field, event_field)], [(dest, event_dest)]) or None."""
+    toks = [t for t in re.split(r"[\s,]+", arg.strip()) if t]
+    if len(toks) < 2 or "=" in arg:
+        return None                        # options like local=, update=
+    table, toks = toks[0], toks[1:]
+    upper = [t.upper() for t in toks]
+    if "OUTPUTNEW" in upper or "OUTPUT" not in upper:
+        return None
+    cut = upper.index("OUTPUT")
+
+    def pairs(items):
+        out, i = [], 0
+        while i < len(items):
+            name = items[i]
+            if i + 1 < len(items) and items[i + 1].upper() == "AS":
+                if i + 2 >= len(items):
+                    return None
+                out.append((name, items[i + 2]))
+                i += 3
+            else:
+                out.append((name, name))
+                i += 1
+        return out
+
+    keys, outs = pairs(toks[:cut]), pairs(toks[cut + 1:])
+    if not keys or not outs:
+        return None
+    names = [n for p in keys + outs for n in p]
+    if not all(_LOOKUP_NAME.fullmatch(n) and n.upper() not in ("AS", "OUTPUT") for n in names):
+        return None
+    lnames = [k for k, _ in keys] + [d for d, _ in outs]
+    enames = [e for _, e in keys] + [e for _, e in outs]
+    if len(set(lnames)) != len(lnames) or len(set(enames)) != len(enames):
+        return None
+    return table, keys, outs
+
+
+def _lookup(arg: str, target: str):
+    parsed = parse_lookup(arg)
+    if parsed is None:
+        return None
+    table, keys, outs = parsed
+    alias = table[:-4] if table.lower().endswith(".csv") else table
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", alias):
+        return None
+    cols = ", ".join([k for k, _ in keys] + [d for d, _ in outs])
+    fx = dict(reads=[e for _, e in keys], add=[e for _, e in outs])
+    T = target.upper()
+    if target == "kql":
+        proj = [kql_name(k) for k, _ in keys] + [
+            kql_name(d) if d == e else f"{kql_name(e)} = {kql_name(d)}" for d, e in outs]
+        on = [kql_name(k) if k == e else f"$left.{kql_name(e)} == $right.{kql_name(k)}"
+              for k, e in keys]
+        text = (f"lookup kind=leftouter (_GetWatchlist('{alias}') | project {', '.join(proj)}) "
+                f"on {', '.join(on)}")
+        warn = LOOKUP_WARNING.format(T=T, table=table, where="a Sentinel watchlist",
+                                     alias=alias, cols=cols,
+                                     conflict="existing columns with an output name are "
+                                              "renamed by KQL, not overwritten as in SPL")
+        return Flagged(text, [warn], **fx)
+    if not re.fullmatch(r"[A-Za-z0-9_]+", alias):
+        return None
+    key_alias = [f"lookup_key_{i + 1}" for i in range(len(keys))]
+    fields = [f"{k} as {a}" for (k, _), a in zip(keys, key_alias)] + [
+        d if d == e else f"{d} as {e}" for d, e in outs]
+    cond = " and ".join(f"lk.{a} = {e}" for (_, e), a in zip(keys, key_alias))
+    text = (f"join type = left (dataset = {alias} | fields {', '.join(fields)}) as lk {cond}\n"
+            f"| fields - {', '.join(key_alias)}")
+    warn = LOOKUP_WARNING.format(T=T, table=table, where="an XQL lookup dataset",
+                                 alias=alias, cols=cols,
+                                 conflict="output fields overwrite existing fields "
+                                          "(conflict_strategy right); `dataset = <lookup>` "
+                                          "and `fields -` are not shown in the docs")
+    return Flagged(text, [warn], **fx)
