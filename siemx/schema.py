@@ -86,3 +86,38 @@ def order_check(parts: list, target: str) -> list[str]:
         if "loses" in order:
             target_sorted, spl_newest_first = False, False
     return list(dict.fromkeys(warnings))
+
+
+def output_fields(parts: list, target: str) -> list[str] | None:
+    """Fields available after all stages, or None if unknown (no field list for
+    the table and no stage that fixes the output columns)."""
+    known = known_fields(table_of(parts[0], target), target)
+    fields = set(known) if known else None
+    for part in parts[1:]:
+        only = getattr(part, "only", None)
+        if only is not None:
+            fields = set(only)
+        if fields is not None:
+            fields -= set(getattr(part, "drop", []))
+            fields |= set(getattr(part, "add", []))
+    return sorted(fields) if fields is not None else None
+
+
+def unique_after(parts: list) -> set[str] | None:
+    """Fields F such that the result has at most one row per value of F, or None.
+    Set by stats/dedup/top/timechart; kept by where/sort/head/eval and by stages
+    that keep F; lost by row-multiplying stages or stages that change F."""
+    uniq = None
+    for part in parts[1:]:
+        u = getattr(part, "unique", None)
+        if u is not None:
+            uniq = set(u)
+            continue
+        if uniq is None:
+            continue
+        only = getattr(part, "only", None)
+        changed = set(getattr(part, "drop", [])) | set(getattr(part, "add", []))
+        if (getattr(part, "multiplies", False) or (only is not None and not uniq <= set(only))
+                or uniq & changed):
+            uniq = None
+    return uniq

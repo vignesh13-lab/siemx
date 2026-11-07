@@ -37,6 +37,8 @@ Doc references:
   KQL lookup:       https://learn.microsoft.com/en-us/kusto/query/lookup-operator
   Sentinel watchlists: https://learn.microsoft.com/en-us/azure/sentinel/watchlists-queries
   XQL join:         https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/join.md
+  SPL join:         https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/9.4/search-commands/join
+  KQL join:         https://learn.microsoft.com/en-us/kusto/query/join-operator
   XQL limit order:  https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/limit.md
 """
 import json
@@ -58,15 +60,22 @@ class Out(str):
       order   - "sorts" (sort), "loses" (stats, dedup: target output order is
                 not guaranteed), "takes_first" (head: picks the first N rows),
                 "keeps_first" (dedup: SPL keeps the first row in current order)
+    and, for join (max=1 needs at most one subsearch row per key):
+      unique  - after this stage there is at most one row per combination of
+                these fields (stats by, dedup, top, timechart); [] = one row
+      multiplies - the stage can produce several rows per input row (lookup, join)
     """
     warnings: list[str] = []
 
-    def __new__(cls, text: str, *, reads=(), only=None, add=(), drop=(), order=()):
+    def __new__(cls, text: str, *, reads=(), only=None, add=(), drop=(), order=(),
+                unique=None, multiplies=False):
         obj = super().__new__(cls, text)
         obj.reads = list(reads)
         obj.only = None if only is None else list(only)
         obj.add, obj.drop = list(add), list(drop)
         obj.order = set([order] if isinstance(order, str) else order)
+        obj.unique = None if unique is None else list(unique)
+        obj.multiplies = multiplies
         return obj
 
 
@@ -155,6 +164,9 @@ def stage(stage_text: str, target: str):
     if cmd == "lookup":
         return _lookup(arg, target)
 
+    if cmd == "join":
+        return _join(arg, target)
+
     if cmd == "dedup":
         return _dedup(arg, target)
 
@@ -172,7 +184,7 @@ def stage(stage_text: str, target: str):
     if m:
         by_fields = _fields(m.group(1)) if m.group(1) else []
         by = f" by {_names(by_fields, target)}" if by_fields else ""
-        fx = dict(reads=by_fields, only=["count", *by_fields], order="loses")
+        fx = dict(reads=by_fields, only=["count", *by_fields], order="loses", unique=by_fields)
         if target == "kql":
             return Out(f"summarize {kql_name('count')} = count(){by}", **fx)
         return Out(f"comp count() as count{by}", **fx)
@@ -260,13 +272,14 @@ def _dedup(arg: str, target: str):
         notempty = " and ".join(f"isnotempty({kql_name(f)})" for f in fields)
         text = (f"where {notempty}\n"
                 f"| summarize arg_max(TimeGenerated, *) by {_names(fields, target)}")
-        return Out(text, reads=[*fields, "TimeGenerated"], order={"keeps_first", "loses"})
+        return Out(text, reads=[*fields, "TimeGenerated"], order={"keeps_first", "loses"},
+                   unique=fields)
     if not all(_XQL_IDENT.fullmatch(f) for f in fields):
         return None
     notnull = " and ".join(f"{f} != null" for f in fields)
     text = f"filter {notnull}\n| dedup {', '.join(fields)} by desc _time"
     return Flagged(text, [XQL_DEDUP_WARNING], reads=[*fields, "_time"],
-                   order={"keeps_first", "loses"})
+                   order={"keeps_first", "loses"}, unique=fields)
 
 
 # ---- eval ---------------------------------------------------------------------
@@ -424,7 +437,7 @@ def _top(arg: str, target: str):
         text = f"comp count() as {countfield} by {f}\n| sort desc {countfield}"
         if limit:
             text += f"\n| limit {limit}"
-    fx = dict(reads=[f], only=[f, countfield], order="sorts")
+    fx = dict(reads=[f], only=[f, countfield], order="sorts", unique=[f])
     if showperc:
         return Flagged(text, [TOP_PERCENT_WARNING.format(T=target.upper())], **fx)
     return Out(text, **fx)
@@ -592,7 +605,7 @@ def _timechart(arg: str, target: str):
         warnings.append(XQL_TC_ALIGN_WARNING)
         text = f"bin _time span = {span}\n| comp count() as count by _time\n| sort asc _time"
         reads = ["_time"]
-    fx = dict(reads=reads, only=["_time", "count"], order="sorts")
+    fx = dict(reads=reads, only=["_time", "count"], order="sorts", unique=["_time"])
     return Flagged(text, warnings, **fx) if warnings else Out(text, **fx)
 
 
@@ -664,7 +677,7 @@ def _lookup(arg: str, target: str):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", alias):
         return None
     cols = ", ".join([k for k, _ in keys] + [d for d, _ in outs])
-    fx = dict(reads=[e for _, e in keys], add=[e for _, e in outs])
+    fx = dict(reads=[e for _, e in keys], add=[e for _, e in outs], multiplies=True)
     T = target.upper()
     if target == "kql":
         proj = [kql_name(k) for k, _ in keys] + [
@@ -692,3 +705,122 @@ def _lookup(arg: str, target: str):
                                           "(conflict_strategy right); `dataset = <lookup>` "
                                           "and `fields -` are not shown in the docs")
     return Flagged(text, [warn], **fx)
+
+
+# ---- join ---------------------------------------------------------------------------
+# SPL `join [type=inner|left|outer] [max=N] <fields> [<subsearch>]`: defaults
+# type=inner, max=1 (each event joins to only the FIRST subsearch row),
+# overwrite=true (subsearch values replace event values). left == outer.
+# Subsearches are limited to 50,000 rows / 60 s and silently truncated.
+#   KQL: join kind=inner|leftouter (<sub>) on <fields>. The default kind
+#        innerunique de-duplicates the LEFT side, so the kind is always given.
+#        inner/leftouter return every matching row; same-named right columns are
+#        renamed, not overwritten.
+#   XQL: join type = inner|left (<sub>) as sub <cond>; conflict_strategy right
+#        (default) = subsearch wins, like SPL. Keys are aliased in the subquery.
+# The subsearch is translated by the same rules; any gap -> None.
+# max=1 is only converted when the subsearch provably has at most one row per
+# key (ends in stats/dedup/top by the keys), otherwise None. max=0 -> all rows.
+# Always flagged (subsearch limits, column conflicts).
+# None: no field list (joins on all common fields), usetime/earlier/overwrite,
+# left=/right=/where forms, other max values.
+
+JOIN_WARNING = ("{T}: SPL join subsearches are limited to 50,000 rows / 60 s and silently "
+                "truncated; the target has no such limit. {conflict}. Verify")
+JOIN_KQL_CONFLICT = ("Right-side columns with the same name as left-side columns are renamed "
+                     "(SPL overwrite=true replaces them) and the join key appears twice")
+JOIN_XQL_CONFLICT = ("Subsearch fields overwrite event fields (conflict_strategy right), like "
+                     "SPL; `fields -` on the subquery is not shown in the docs")
+
+
+def split_subsearch(arg: str):
+    """'type=left host [search x | y]' -> ('type=left host', 'search x | y') or None."""
+    start = arg.find("[")
+    if start < 0 or not arg.rstrip().endswith("]"):
+        return None
+    depth, quote = 0, None
+    for i in range(start, len(arg)):
+        ch = arg[i]
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return (arg[:start], arg[start + 1:i].strip()) if not arg[i + 1:].strip() else None
+    return None
+
+
+def convert_rules_only(spl: str, target: str) -> list | None:
+    """Translate a (sub)search with rules only; None if any stage has no rule."""
+    from .triage import split_stages
+    stages = split_stages(spl)
+    if not stages:
+        return None
+    head = re.sub(r"(?i)^search\s+", "", stages[0])
+    first = first_stage(head, target)
+    rest = [stage(s, target) for s in stages[1:]]
+    if first is None or any(r is None for r in rest):
+        return None
+    return [first, *rest]
+
+
+def _join(arg: str, target: str):
+    from . import schema
+    split = split_subsearch(arg)
+    if split is None:
+        return None
+    head, sub = split
+    opts, keys = {"type": "inner", "max": "1"}, []
+    for tok in [t for t in re.split(r"[\s,]+", head.strip()) if t]:
+        m = re.fullmatch(r"(type|max)=(\w+)", tok)
+        if m:
+            opts[m.group(1)] = m.group(2).lower()
+        elif "=" in tok or not _PLAIN_IDENT.fullmatch(tok):
+            return None                    # usetime, earlier, overwrite, left=/right=
+        else:
+            keys.append(tok)
+    kind = {"inner": "inner", "left": "leftouter", "outer": "leftouter"}.get(opts["type"])
+    if not keys or kind is None or opts["max"] not in ("0", "1") or len(set(keys)) != len(keys):
+        return None
+    parts = convert_rules_only(sub, target)
+    if parts is None:
+        return None
+    if opts["max"] == "1":
+        uniq = schema.unique_after(parts)
+        if uniq is None or not uniq <= set(keys):
+            return None                    # first-row-per-key semantics not reproducible
+    T = target.upper()
+    warnings = []
+    for part in parts:
+        warnings += [f"subsearch: {w}" for w in getattr(part, "warnings", [])]
+    warnings += [f"subsearch: {w}" for w in schema.check(parts, target)]
+    warnings += [f"subsearch: {w}" for w in schema.order_check(parts, target)]
+    sub_fields = schema.output_fields(parts, target)
+    if sub_fields is not None and not set(keys) <= set(sub_fields):
+        warnings.append(f"{T}: join key(s) not produced by the subsearch: "
+                        + ", ".join(k for k in keys if k not in sub_fields))
+    fx = dict(reads=keys, add=[f for f in (sub_fields or []) if f not in keys],
+              order="loses", multiplies=opts["max"] == "0")
+    if target == "kql":
+        body = "\n".join("    " + line for line in "\n| ".join(parts).split("\n"))
+        text = f"join kind={kind} (\n{body}\n) on {', '.join(kql_name(k) for k in keys)}"
+        warnings.insert(0, JOIN_WARNING.format(T=T, conflict=JOIN_KQL_CONFLICT))
+        return Flagged(text, list(dict.fromkeys(warnings)), **fx)
+    if not all(_XQL_IDENT.fullmatch(k) for k in keys):
+        return None
+    aliases = [f"join_key_{i + 1}" for i in range(len(keys))]
+    sub_parts = [*parts,
+                 "alter " + ", ".join(f"{a} = {k}" for a, k in zip(aliases, keys)),
+                 "fields - " + ", ".join(keys)]
+    body = "\n    ".join("\n| ".join(sub_parts).split("\n"))
+    cond = " and ".join(f"sub.{a} = {k}" for a, k in zip(aliases, keys))
+    xtype = "inner" if kind == "inner" else "left"
+    text = (f"join type = {xtype} ({body}) as sub {cond}\n"
+            f"| fields - {', '.join(aliases)}")
+    warnings.insert(0, JOIN_WARNING.format(T=T, conflict=JOIN_XQL_CONFLICT))
+    return Flagged(text, list(dict.fromkeys(warnings)), **fx)
