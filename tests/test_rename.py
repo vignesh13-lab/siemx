@@ -60,12 +60,13 @@ def test_rename_unsupported(spl):
 
 
 def test_rename_end_to_end(sources_map, no_llm):
-    spl = "index=wineventlog | stats count by host | rename host AS Computer | head 5"
+    spl = ("index=wineventlog | stats count by host | rename host AS Computer "
+           "| sort - count | head 5")
     kql = pipeline.convert_query(spl, "kql")
     assert kql["query"] == ("SecurityEvent\n| summarize ['count'] = count() by host\n"
-                            "| project-rename Computer = host\n| take 5")
+                            "| project-rename Computer = host\n| sort by ['count'] desc\n| take 5")
     assert pipeline.status_for(kql) == "auto-approved"
     xql = pipeline.convert_query(spl, "xql")
     assert xql["query"] == ("dataset = xdr_data\n| comp count() as count by host\n"
-                            "| alter Computer = host\n| fields - host\n| limit 5")
+                            "| alter Computer = host\n| fields - host\n| sort desc count\n| limit 5")
     assert pipeline.status_for(xql) == "needs-review"

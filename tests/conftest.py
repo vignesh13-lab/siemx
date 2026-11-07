@@ -12,8 +12,8 @@ SOURCES = {"index=wineventlog": {"kql": "SecurityEvent", "xql": "dataset = xdr_d
 # `user` so pipeline-mechanics tests are not affected by the field check;
 # tests/test_schema.py covers the check itself.
 TEST_FIELDS = {
-    "kql": {"SecurityEvent": {"fields": ["Computer", "EventID", "host", "user"]}},
-    "xql": {"xdr_data": {"fields": ["agent_hostname", "host", "user"]}},
+    "kql": {"SecurityEvent": {"fields": ["Computer", "EventID", "TimeGenerated", "host", "user"]}},
+    "xql": {"xdr_data": {"fields": ["_time", "agent_hostname", "host", "user"]}},
 }
 
 

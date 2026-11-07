@@ -55,3 +55,34 @@ def check(parts: list, target: str) -> list[str]:
                 f"field names not verified: {names}"]
     return [f"{target.upper()}: field(s) not in {table} (mappings/fields.json): {names}. "
             "Field names are copied from SPL unmapped; verify"]
+
+
+ORDER_HEAD_WARNING = ("{T}: head -> {op} on rows with no defined order; SPL takes the first rows "
+                      "in its order (newest first, or as sorted by stats). Add a sort or verify")
+ORDER_DEDUP_WARNING = ("{T}: dedup keeps the newest row per group, but SPL keeps the first row "
+                       "in the current (re-sorted) order; verify")
+
+
+def order_check(parts: list, target: str) -> list[str]:
+    """Flag stages whose result depends on row order that the target does not keep.
+
+    SPL search results start newest-first; KQL/XQL results have no defined order
+    until a sort (take/limit docs: no guarantee which records are returned
+    unless sorted). where / table / rename are assumed to keep the order.
+    """
+    T = target.upper()
+    op = "take" if target == "kql" else "limit"
+    target_sorted = False      # target rows are in a defined order
+    spl_newest_first = True    # SPL rows still in default newest-first order
+    warnings: list[str] = []
+    for part in parts[1:]:
+        order = getattr(part, "order", set())
+        if "keeps_first" in order and not spl_newest_first:
+            warnings.append(ORDER_DEDUP_WARNING.format(T=T))
+        if "takes_first" in order and not target_sorted:
+            warnings.append(ORDER_HEAD_WARNING.format(T=T, op=op))
+        if "sorts" in order:
+            target_sorted, spl_newest_first = True, False
+        if "loses" in order:
+            target_sorted, spl_newest_first = False, False
+    return list(dict.fromkeys(warnings))

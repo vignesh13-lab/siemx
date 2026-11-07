@@ -90,9 +90,12 @@ def test_missing_table_flags_everything(sources_map, no_llm, monkeypatch, tmp_pa
     assert status == "needs-review" and "no field list for SecurityEvent" in warnings[0]
 
 
-def test_query_without_field_reads_not_flagged(sources_map, no_llm, real_fields):
-    assert convert("index=wineventlog | head 10", "kql") == ("auto-approved", [])
-    assert convert("index=wineventlog | head 10", "xql") == ("auto-approved", [])
+def test_query_without_field_reads_has_no_field_warning(sources_map, no_llm, real_fields):
+    """head reads no fields; it is flagged only by the order check."""
+    for t in ("kql", "xql"):
+        status, warnings = convert("index=wineventlog | head 10", t)
+        assert status == "needs-review"
+        assert len(warnings) == 1 and "no defined order" in warnings[0]
 
 
 def test_rule_outputs_report_effects():
