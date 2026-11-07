@@ -141,6 +141,20 @@ def test_unruled_stage_goes_to_llm_and_is_flagged(workspace, monkeypatch):
     assert [m["target"] for m in pipeline.review_list()] == ["kql"]
 
 
+def test_flagged_rule_output_is_needs_review(sources_map, no_llm):
+    spl = 'index=wineventlog | where user="admin" | stats count by host'
+    kql = pipeline.convert_query(spl, "kql")
+    assert kql["query"] == ("SecurityEvent\n| where user == \"admin\"\n"
+                            "| summarize ['count'] = count() by host")
+    assert pipeline.status_for(kql) == "auto-approved"
+
+    xql = pipeline.convert_query(spl, "xql")
+    assert xql["query"] == ("dataset = xdr_data\n| filter user = \"admin\"\n"
+                            "| comp count() as count by host")
+    assert xql["method"] == "rules" and xql["warnings"]
+    assert pipeline.status_for(xql) == "needs-review"
+
+
 @pytest.mark.parametrize("res, status", [
     ({"query": "q", "confidence": 0.9, "warnings": []}, "auto-approved"),
     ({"query": "q", "confidence": config.CONF_AUTO_APPROVE, "warnings": []}, "auto-approved"),
