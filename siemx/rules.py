@@ -22,6 +22,9 @@ Doc references:
   XQL dedup:        https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/dedup.md
   KQL take order:   https://learn.microsoft.com/en-us/kusto/query/take-operator
   SPL/KQL/XQL eval: see expr.py and _eval() below
+  SPL top:          https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/9.4/search-commands/top
+  KQL top:          https://learn.microsoft.com/en-us/kusto/query/top-operator
+  XQL top:          https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/top.md
   XQL limit order:  https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/limit.md
 """
 import json
@@ -127,6 +130,9 @@ def stage(stage_text: str, target: str):
 
     if cmd == "eval" and arg:
         return _eval(arg, target)
+
+    if cmd == "top":
+        return _top(arg, target)
 
     if cmd == "dedup":
         return _dedup(arg, target)
@@ -337,3 +343,67 @@ def _eval(arg: str, target: str):
     text = "\n| ".join(f"{op} {', '.join(s)}" for s in stages)
     fx = dict(reads=reads, add=[n for n, _ in assigns])
     return Flagged(text, warnings, **fx) if warnings else Out(text, **fx)
+
+
+# ---- top ------------------------------------------------------------------------
+# SPL `top [N] [limit=N] field [countfield=x] [showperc=f]`: the N most common
+# values of field with a count column (default `count`) and a percent column
+# (default `percent`); default limit 10, limit=0 returns all values.
+#   KQL: summarize count by field | top N by count desc (top output is sorted).
+#   XQL: comp / sort / limit (exact). XQL's own `top` stage reports an
+#        "approximate count", so it is not used.
+# The SPL docs do not define the percent denominator, so percent is not
+# produced: if SPL would output it (showperc defaults to true), the result is
+# flagged. `by`, several fields, useother and showcount=f -> None.
+
+TOP_PERCENT_WARNING = ("{T}: SPL top also outputs a percent column; its denominator is not "
+                       "documented, so it is not produced. Add it if the detection uses it")
+_TOP_OPTION = re.compile(r"(limit|countfield|showperc)=(\S+)")
+_FALSE = {"f", "false", "0"}
+_TRUE = {"t", "true", "1"}
+
+
+def _top(arg: str, target: str):
+    tokens = arg.split()
+    limit, countfield, showperc, fields = 10, "count", True, []
+    for i, tok in enumerate(tokens):
+        if "=" in tok:
+            m = _TOP_OPTION.fullmatch(tok)
+            if not m:
+                return None                  # useother, showcount, percentfield, ...
+            key, val = m.groups()
+            if key == "limit":
+                if not val.isdigit():
+                    return None
+                limit = int(val)
+            elif key == "countfield":
+                countfield = val
+            elif val.lower() in _FALSE:
+                showperc = False
+            elif val.lower() not in _TRUE:
+                return None
+        elif tok.isdigit() and i == 0:
+            limit = int(tok)
+        elif tok.lower() == "by":
+            return None                      # per-group top: not handled yet
+        else:
+            fields.append(tok)
+    if len(fields) != 1 or not _PLAIN_IDENT.fullmatch(countfield):
+        return None                          # multi-field top has odd semantics
+    f = fields[0]
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", f) or f == countfield:
+        return None
+    if target == "kql":
+        c = kql_name(countfield)
+        tail = f"top {limit} by {c} desc" if limit else f"sort by {c} desc"
+        text = f"summarize {c} = count() by {kql_name(f)}\n| {tail}"
+    else:
+        if not _XQL_IDENT.fullmatch(f):
+            return None
+        text = f"comp count() as {countfield} by {f}\n| sort desc {countfield}"
+        if limit:
+            text += f"\n| limit {limit}"
+    fx = dict(reads=[f], only=[f, countfield], order="sorts")
+    if showperc:
+        return Flagged(text, [TOP_PERCENT_WARNING.format(T=target.upper())], **fx)
+    return Out(text, **fx)
