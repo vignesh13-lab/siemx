@@ -12,6 +12,10 @@ Doc references:
   XQL count():      https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/functions/count_with_comp_stage.md
   XQL sort:         https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/sort.md
   SPL/KQL/XQL where/filter: see expr.py
+  SPL rename:       https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/9.4/search-commands/rename
+  KQL project-rename: https://learn.microsoft.com/en-us/kusto/query/project-rename-operator
+  XQL alter:        https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/alter.md
+  XQL fields:       https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/fields.md
 """
 import json
 import re
@@ -89,6 +93,9 @@ def stage(stage_text: str, target: str):
         text = f"where {r.text}" if target == "kql" else f"filter {r.text}"
         return Flagged(text, r.warnings) if r.warnings else text
 
+    if cmd == "rename":
+        return _rename(arg, target)
+
     if cmd == "head" and arg.isdigit():
         return f"take {arg}" if target == "kql" else f"limit {arg}"
 
@@ -112,3 +119,49 @@ def stage(stage_text: str, target: str):
         return f"sort {'desc' if desc else 'asc'} {m.group(2)}"
 
     return None
+
+
+# ---- rename -------------------------------------------------------------------
+
+_RENAME_NAME = r'(?:"[^"]*"|[^\s,"]+)'
+_RENAME_PAIR = re.compile(rf"\s*({_RENAME_NAME})\s+[Aa][Ss]\s+({_RENAME_NAME})\s*(?:,|(?=\s)|$)")
+_XQL_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+XQL_RENAME_WARNING = ("XQL has no rename stage; emitted `alter new = old | fields - old`. "
+                      "Docs only show `fields -` after a `fields` selection; verify it keeps "
+                      "all other fields")
+
+
+def parse_rename(arg: str) -> list[tuple[str, str]] | None:
+    """`a AS b, "c d" AS e` -> [("a", "b"), ("c d", "e")], or None if unsupported."""
+    pairs, pos = [], 0
+    while pos < len(arg):
+        m = _RENAME_PAIR.match(arg, pos)
+        if not m or m.end() == pos:
+            return None
+        pairs.append(tuple(n[1:-1] if n.startswith('"') else n for n in m.groups()))
+        pos = m.end()
+    if not pairs:
+        return None
+    olds = [o for o, _ in pairs]
+    news = [n for _, n in pairs]
+    if any("*" in n or not n for pair in pairs for n in pair):
+        return None                      # wildcard renames: not handled
+    if len(set(olds)) != len(olds) or len(set(news)) != len(news):
+        return None                      # one field -> two names is invalid SPL
+    if set(olds) & set(news):
+        return None                      # chained/swapped renames: order semantics unclear
+    return pairs
+
+
+def _rename(arg: str, target: str):
+    pairs = parse_rename(arg)
+    if pairs is None:
+        return None
+    if target == "kql":
+        return "project-rename " + ", ".join(f"{kql_name(n)} = {kql_name(o)}" for o, n in pairs)
+    if not all(_XQL_IDENT.fullmatch(x) for pair in pairs for x in pair):
+        return None                      # XQL quoting of special names not verified
+    alter = "alter " + ", ".join(f"{n} = {o}" for o, n in pairs)
+    drop = "fields - " + ", ".join(o for o, _ in pairs)
+    return Flagged(f"{alter}\n| {drop}", [XQL_RENAME_WARNING])
