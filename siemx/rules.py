@@ -21,6 +21,7 @@ Doc references:
   KQL isnotempty(): https://learn.microsoft.com/en-us/kusto/query/isnotempty-function
   XQL dedup:        https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/dedup.md
   KQL take order:   https://learn.microsoft.com/en-us/kusto/query/take-operator
+  SPL/KQL/XQL eval: see expr.py and _eval() below
   XQL limit order:  https://cortex-docs.paloaltonetworks.com/xql-command-reference-guide/readme/stages/limit.md
 """
 import json
@@ -123,6 +124,9 @@ def stage(stage_text: str, target: str):
         text = f"where {r.text}" if target == "kql" else f"filter {r.text}"
         reads = expr.fields_in(expr.parse(arg))
         return Flagged(text, r.warnings, reads=reads) if r.warnings else Out(text, reads=reads)
+
+    if cmd == "eval" and arg:
+        return _eval(arg, target)
 
     if cmd == "dedup":
         return _dedup(arg, target)
@@ -236,3 +240,100 @@ def _dedup(arg: str, target: str):
     text = f"filter {notnull}\n| dedup {', '.join(fields)} by desc _time"
     return Flagged(text, [XQL_DEDUP_WARNING], reads=[*fields, "_time"],
                    order={"keeps_first", "loses"})
+
+
+# ---- eval ---------------------------------------------------------------------
+# SPL `eval a = <expr>, b = <expr>`: later assignments may use earlier ones and
+# existing fields are overwritten (search-commands/eval).
+#   KQL: extend (replaces existing columns). The docs do not say a later
+#        expression in the same extend can use an earlier one, so a dependent
+#        assignment starts a new extend stage.
+#   XQL: alter (comma-separated assignments, overwrites existing fields).
+# Expressions: see expr.py.
+
+_ASSIGN = re.compile(r"\s*('(?:[^'\\]|\\.)+'|[A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)\s*(.+?)\s*$", re.S)
+
+
+def split_top_level(arg: str, sep: str = ",") -> list[str] | None:
+    """Split on `sep` outside quotes and parentheses; None if unbalanced."""
+    parts, buf, depth, quote = [], [], 0, None
+    i = 0
+    while i < len(arg):
+        ch = arg[i]
+        if quote:
+            buf.append(ch)
+            if ch == "\\" and i + 1 < len(arg):
+                buf.append(arg[i + 1])
+                i += 1
+            elif ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+            buf.append(ch)
+        elif ch == "(":
+            depth += 1
+            buf.append(ch)
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                return None
+            buf.append(ch)
+        elif ch == sep and depth == 0:
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    if quote or depth:
+        return None
+    parts.append("".join(buf))
+    return parts
+
+
+def parse_eval(arg: str) -> list[tuple[str, str]] | None:
+    """`a = x + 1, 'b c' = "y"` -> [("a", "x + 1"), ("b c", '"y"')]."""
+    pieces = split_top_level(arg)
+    if not pieces:
+        return None
+    out = []
+    for piece in pieces:
+        m = _ASSIGN.fullmatch(piece)
+        if not m:
+            return None
+        name = m.group(1)
+        if name.startswith("'"):
+            name = re.sub(r"\\(.)", r"\1", name[1:-1])
+        out.append((name, m.group(2)))
+    return out
+
+
+def _eval(arg: str, target: str):
+    assigns = parse_eval(arg)
+    if not assigns:
+        return None
+    stages: list[list[str]] = [[]]
+    stage_names: set[str] = set()
+    created: set[str] = set()
+    reads: list[str] = []
+    warnings: list[str] = []
+    for name, src in assigns:
+        node = expr.parse_value(src)
+        r = expr.render_value(node, target) if node is not None else None
+        if r is None:
+            return None
+        if target == "xql" and not _XQL_IDENT.fullmatch(name):
+            return None                      # XQL quoting of special names not verified
+        used = expr.fields_in(node)
+        reads += [f for f in used if f not in created and f not in reads]
+        if stage_names & set(used):          # depends on this stage -> new stage
+            stages.append([])
+            stage_names = set()
+        lhs = kql_name(name) if target == "kql" else name
+        stages[-1].append(f"{lhs} = {r.text}")
+        stage_names.add(name)
+        created.add(name)
+        warnings += [w for w in r.warnings if w not in warnings]
+    op = "extend" if target == "kql" else "alter"
+    text = "\n| ".join(f"{op} {', '.join(s)}" for s in stages)
+    fx = dict(reads=reads, add=[n for n, _ in assigns])
+    return Flagged(text, warnings, **fx) if warnings else Out(text, **fx)
