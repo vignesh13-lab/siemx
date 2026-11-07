@@ -186,3 +186,23 @@ def render(node, target: str) -> Rendered | None:
 def translate(spl_expr: str, target: str) -> Rendered | None:
     node = parse(spl_expr)
     return render(node, target) if node is not None else None
+
+
+def fields_in(node) -> list[str]:
+    """Field names referenced by a parsed expression, in first-seen order."""
+    out: list[str] = []
+
+    def walk(n):
+        if n[0] == "cmp":
+            for o in (n[1], n[3]):
+                if o[0] == "field" and o[1] not in out:
+                    out.append(o[1])
+        elif n[0] == "not":
+            walk(n[1])
+        else:
+            for c in n[1]:
+                walk(c)
+
+    if node is not None:
+        walk(node)
+    return out
