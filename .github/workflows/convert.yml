@@ -2,7 +2,7 @@ name: convert-detections
 on:
   push:
     branches: [main]
-    paths: ["detections/spl/**", "mappings/**", "gold/**"]
+    paths: ["detections/spl/**", "mappings/**", "gold/**", "siemx/**"]
   workflow_dispatch:
   schedule:
     - cron: "0 2 * * 0"   # weekly full recheck after docs/model changes

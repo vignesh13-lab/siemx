@@ -7,7 +7,7 @@ from siemx import config, pipeline
 SPL = "index=wineventlog | stats count by host | sort - count | head 10"
 
 EXPECTED = {
-    "kql": "SecurityEvent\n| summarize count() by host\n| sort by count desc\n| take 10",
+    "kql": "SecurityEvent\n| summarize ['count'] = count() by host\n| sort by ['count'] desc\n| take 10",
     "xql": "dataset = xdr_data\n| comp count() as count by host\n| sort desc count\n| limit 10",
 }
 
@@ -41,8 +41,30 @@ def test_process_file_writes_output_and_meta(workspace, no_llm):
         assert out.read_text() == EXPECTED[t] + "\n"
         m = meta("top_hosts", t)
         assert m["src_hash"] == pipeline.sha(SPL)
+        assert m["converter"] == config.CONVERTER_VERSION
+        assert m["src"] == "detections/spl/windows/top_hosts.spl"   # repo-relative
         assert m["status"] == "auto-approved"
         assert m["method"] == "rules"
+
+
+def test_converter_version_change_reconverts(workspace, no_llm, monkeypatch):
+    """A rule fix must regenerate output even when the SPL is unchanged."""
+    f = write_spl()
+    pipeline.process_file(f, ["kql"], force=False)
+    assert pipeline.process_file(f, ["kql"], force=False)[0]["status"] == "skipped"
+
+    monkeypatch.setattr(config, "CONVERTER_VERSION", "test-next")
+    assert pipeline.process_file(f, ["kql"], force=False)[0]["status"] == "auto-approved"
+    assert meta("top_hosts", "kql")["converter"] == "test-next"
+
+
+def test_old_meta_without_converter_is_reconverted(workspace, no_llm):
+    """Meta written before the converter field existed counts as stale."""
+    f = write_spl()
+    config.META_DIR.mkdir(parents=True)
+    (config.META_DIR / "top_hosts.kql.json").write_text(
+        json.dumps({"src_hash": pipeline.sha(SPL), "status": "auto-approved"}))
+    assert pipeline.process_file(f, ["kql"], force=False)[0]["status"] == "auto-approved"
 
 
 def test_unchanged_input_is_skipped(workspace, no_llm, monkeypatch):

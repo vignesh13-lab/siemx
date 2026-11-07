@@ -40,6 +40,14 @@ def status_for(res: dict) -> str:
     return "auto-approved"
 
 
+def is_current(meta_path, src_hash: str) -> bool:
+    """True if this output was made from the same SPL by the same converter version."""
+    if not meta_path.exists():
+        return False
+    m = json.loads(meta_path.read_text())
+    return m.get("src_hash") == src_hash and m.get("converter") == config.CONVERTER_VERSION
+
+
 def process_file(path, targets, force):
     spl = path.read_text()
     h = sha(spl)
@@ -48,7 +56,7 @@ def process_file(path, targets, force):
     results = []
     for t in targets:
         meta_path = config.META_DIR / f"{name}.{t}.json"
-        if not force and meta_path.exists() and json.loads(meta_path.read_text()).get("src_hash") == h:
+        if not force and is_current(meta_path, h):
             results.append({"file": name, "target": t, "status": "skipped"})
             continue
         res = convert_query(spl, t)
@@ -57,7 +65,8 @@ def process_file(path, targets, force):
         out_file.parent.mkdir(parents=True, exist_ok=True)
         out_file.write_text(res.get("query", "") + "\n")
         config.META_DIR.mkdir(parents=True, exist_ok=True)
-        meta = {"src": str(path), "src_hash": h, "target": t, "status": st,
+        meta = {"src": (config.SRC_REL / path.relative_to(config.SRC_DIR)).as_posix(),
+                "src_hash": h, "converter": config.CONVERTER_VERSION, "target": t, "status": st,
                 "complexity": triage.complexity(spl), "model": llm.MODEL,
                 "ts": int(time.time()),
                 **{k: res.get(k) for k in ("confidence", "method", "warnings", "tokens")}}
