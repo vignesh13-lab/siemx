@@ -101,7 +101,6 @@ def test_first_stage_maps_known_source(sources_map):
 
 
 @pytest.mark.parametrize("stage", [
-    "index=wineventlog EventCode=4625",   # leftover terms need translation
     "index=unknown",
     "search index=wineventlog",
 ])

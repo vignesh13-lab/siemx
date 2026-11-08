@@ -14,22 +14,41 @@ import re
 from . import config
 
 
+_CACHE: dict = {}
+
+
 def _load() -> dict:
     f = config.FIELDS_FILE
-    return json.loads(f.read_text()) if f.exists() else {}
+    if not f.exists():
+        return {}
+    key = (str(f), f.stat().st_mtime_ns)
+    if key not in _CACHE:
+        _CACHE.clear()
+        _CACHE[key] = json.loads(f.read_text(encoding="utf-8"))
+    return _CACHE[key]
 
 
-def table_of(first_stage_text: str, target: str) -> str:
-    """'SecurityEvent' -> 'SecurityEvent'; 'dataset = xdr_data' -> 'xdr_data'."""
+def table_of(first_stage, target: str) -> str:
+    """Table/dataset name of the first stage ('dataset = xdr_data' -> 'xdr_data').
+    A first stage with a filter carries the name in its .table attribute."""
+    table = getattr(first_stage, "table", None)
+    if table:
+        return table
     if target == "xql":
-        m = re.fullmatch(r"\s*dataset\s*=\s*(\w+)\s*", first_stage_text)
-        return m.group(1) if m else first_stage_text.strip()
-    return first_stage_text.strip()
+        m = re.fullmatch(r"\s*dataset\s*=\s*(\w+)\s*", first_stage)
+        return m.group(1) if m else first_stage.strip()
+    return first_stage.strip()
 
 
 def known_fields(table: str, target: str) -> list[str] | None:
     entry = _load().get(target, {}).get(table)
     return None if entry is None else list(entry.get("fields", []))
+
+
+def field_type(table: str, target: str, field: str) -> str | None:
+    """Column type from mappings/fields.json ('int', 'string', ...), or None."""
+    entry = _load().get(target, {}).get(table) or {}
+    return entry.get("types", {}).get(field)
 
 
 def check(parts: list, target: str) -> list[str]:
@@ -40,7 +59,7 @@ def check(parts: list, target: str) -> list[str]:
     seen = set(schema)                 # every field that existed at some point
     unknown: list[str] = []
     removed: list[str] = []
-    for part in parts[1:]:
+    for part in parts:                 # parts[0] may filter fields too (base search)
         for f in getattr(part, "reads", []):
             if f in schema or f in unknown or f in removed:
                 continue

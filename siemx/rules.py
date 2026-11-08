@@ -121,14 +121,37 @@ def _load_sources() -> dict:
 
 
 def first_stage(stage: str, target: str):
-    """Map `index=... sourcetype=...` to a table/dataset via mappings/sources.json."""
-    for prefix, tgt in _load_sources().items():
-        if stage.lower().startswith(prefix.lower()) and target in tgt:
-            rest = stage[len(prefix):].strip()
-            if rest:   # leftover search terms need real translation
-                return None
-            return tgt[target]
-    return None
+    """Base search -> table/dataset (mappings/sources.json) + filter (search.py).
+
+    The index/sourcetype/source terms must match a sources.json key exactly
+    (an unmatched sourcetype could not be dropped safely); other terms become
+    a where / filter. Free text, time modifiers etc. -> None."""
+    from . import schema, search
+    try:
+        meta, ast = search.parse(stage)
+    except search._Unsupported:
+        return None
+    if not meta:
+        return None
+    table_text = None
+    for key, tgt in _load_sources().items():
+        if search.parse_meta(key) == meta and target in tgt:
+            table_text = tgt[target]
+            break
+    if table_text is None:
+        return None
+    table = schema.table_of(table_text, target)
+    if ast is None:
+        out = Out(table_text)
+    else:
+        r = search.render(ast, target, lambda f: schema.field_type(table, target, f))
+        if r is None:
+            return None
+        op = "where" if target == "kql" else "filter"
+        text = f"{table_text}\n| {op} {r.text}"
+        out = Flagged(text, r.warnings, reads=r.reads) if r.warnings else Out(text, reads=r.reads)
+    out.table = table
+    return out
 
 
 def stage(stage_text: str, target: str):
