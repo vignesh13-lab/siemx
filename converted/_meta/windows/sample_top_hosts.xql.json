@@ -1,0 +1,23 @@
+{
+  "src": "detections/spl/windows/sample_top_hosts.spl",
+  "client": null,
+  "mappings_hash": "d82d2f094bce8204",
+  "src_hash": "6b8ea45158ffe582",
+  "converter": "17",
+  "target": "xql",
+  "status": "needs-review",
+  "complexity": "simple",
+  "model": null,
+  "cached": false,
+  "ts": 1794127156,
+  "query_sha": "5dfb71afc9c7afc8",
+  "confidence": 0.9,
+  "method": "rules",
+  "warnings": [
+    "XQL: no field list for xdr_data in mappings/fields.json; field names not verified: host"
+  ],
+  "tokens": 0,
+  "validator": "name check against the official reference",
+  "field_map": {},
+  "no_rule": null
+}

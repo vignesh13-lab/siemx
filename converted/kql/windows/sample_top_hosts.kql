@@ -1,0 +1,5 @@
+SecurityEvent
+| where isnotempty(Computer)
+| summarize ['count'] = count() by Computer
+| sort by ['count'] desc
+| take 10
