@@ -173,3 +173,30 @@ def test_model_saying_unsupported_leaves_no_query(monkeypatch, tmp_path):
     r = pipeline.llm_with_retry("index=a | transaction u", "xql")
     assert r["query"] == "" and r["warnings"] == ["transaction has no XQL equivalent"]
     assert pipeline.status_for(r) == "unsupported"
+
+
+# ---- no model configured ------------------------------------------------------------------------------
+
+def test_default_without_key_is_not_configured(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert llm.configured() is False
+    with pytest.raises(ValueError, match="no AI model configured"):
+        llm.call_model("p")
+    monkeypatch.setenv("SIEMX_PROVIDER", "ollama")
+    assert llm.configured() is True
+
+
+def test_failed_llm_step_is_retried_next_run(workspace, monkeypatch):
+    """A setup problem (no key, server down) must not be stored as a final answer."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(llm, "cache_dir", lambda: config.OUT_DIR / "_cache" / "llm")
+    f = config.SRC_DIR / "windows" / "tx.spl"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("index=wineventlog | transaction host")
+    assert pipeline.run(["kql"], workers=1) == {"unsupported": 1}
+    meta = json.loads((config.META_DIR / "windows" / "tx.kql.json").read_text())
+    assert meta["warnings"][0].startswith("LLM step failed: no AI model configured")
+
+    monkeypatch.setattr(llm, "translate", lambda *a, **k: dict(ANSWER))   # model now set up
+    assert pipeline.run(["kql"], workers=1) == {"needs-review": 1}         # not skipped
+    assert pipeline.run(["kql"], workers=1) == {"skipped": 1}              # a real answer is kept

@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 from . import config, pipeline
@@ -137,6 +138,10 @@ def main():
         return _gold(a)
     config.set_client(a.client)
     if a.cmd == "convert":
+        from . import llm
+        if not llm.configured():
+            print(f"note: {llm.NO_MODEL}. Queries that need the AI will be marked "
+                  "unsupported and retried on the next run.", file=sys.stderr)
         targets = ["spl"] if a.source in ("kql", "xql") else a.to.split(",")
         counts = pipeline.run(targets, a.workers, a.force, a.path, a.source)
         print(json.dumps({"summary": counts}))
