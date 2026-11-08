@@ -19,19 +19,29 @@ SYSTEM = (
 
 
 def retrieve(spl: str, target: str) -> dict:
-    """TODO: embed each stage, query the vector store (filter by language),
-    and return {'docs': [...], 'examples': [...]} from gold/ and the official docs."""
-    return {"docs": [], "examples": []}
+    """RAG context for the prompt: official doc chunks (retrieve.py, BM25 + name
+    lookup, filtered to SPL + the target language). Empty when the index has not
+    been built (`siemx docs fetch` + `siemx docs build`). 'examples' (gold/) comes
+    with roadmap item 4."""
+    from . import docs
+    from . import retrieve as rag
+    index = rag.get_index(docs.index_dir() / "chunks.jsonl")
+    if index is None:
+        return {"docs": [], "examples": []}
+    return {"docs": rag.retrieve(index, spl, target).docs, "examples": []}
 
 
 def build_prompt(spl: str, target: str) -> str:
     ctx = retrieve(spl, target)
     return (
         f"Translate this SPL to {NAMES[target]}.\n\nSPL:\n{spl}\n\n"
-        f"Reference docs:\n{json.dumps(ctx['docs'])}\n\n"
+        f"Reference docs (official documentation excerpts; each has its source URL):\n"
+        f"{json.dumps(ctx['docs'], ensure_ascii=False)}\n\n"
         f"Verified examples:\n{json.dumps(ctx['examples'])}\n\n"
+        "Use only syntax shown in the reference docs. If something you need is not "
+        "covered by them, add a warning instead of guessing.\n"
         'Return JSON: {"query": str, "confidence": 0-1, "warnings": [str], '
-        '"unsupported": bool}'
+        '"unsupported": bool, "sources": [the URLs of the docs you relied on]}'
     )
 
 

@@ -39,7 +39,14 @@ siemx/search.py                 SPL base-search semantics -> where / filter
 siemx/expr.py                   SPL eval/where expressions -> KQL / XQL
 siemx/schema.py                 field, order and uniqueness checks over rule outputs
 gold/                           (to build) human-verified translation pairs
-docs_index/                     (to build) chunked official docs + vector store
+rag/sources.json                RAG corpus: ~1,009 official doc URLs (SPL 9.4, KQL, XQL). Committed.
+rag/raw/, rag/index/            downloaded pages / chunks.jsonl + bridge.json. Git-ignored
+                                (Splunk/Palo Alto docs are copyrighted; rebuild with siemx docs ...)
+rag/eval.jsonl                  retrieval test set (labels from verified rule mappings)
+siemx/docs.py                   RAG step A: discover + fetch + clean (Splunk HTML -> Markdown)
+siemx/chunking.py               RAG step B: heading-aware chunks with metadata
+siemx/retrieve.py               RAG step C: BM25, language filter, name lookup, official bridge
+siemx/rag_eval.py               RAG step E: hit / recall / MRR
 
 ## How rule output works
 - A rule returns None (no faithful rule -> LLM fallback), a str, rules.Out (str + what it
@@ -63,6 +70,8 @@ pip install -e ".[dev]"
 siemx convert --to kql,xql [--force] [--workers 4] [--client acme] [--path acme]
 siemx status
 siemx review
+siemx docs discover && siemx docs fetch && siemx docs build   # RAG corpus + index
+siemx docs eval --ablation                                      # retrieval quality
 pytest -q
 
 ## Roadmap (do in order; each item = a PR-sized change with tests)
@@ -72,7 +81,14 @@ pytest -q
    multi-field sort. Doc page for each mapping cited in rules.py / search.py / expr.py.
    Follow-ups: eval part 2 (case, match, replace, substr, tonumber, strftime ...),
    stats values/list, timechart by, top by.
-3. RAG ingestion: script to load official docs (Splunk SPL reference, Microsoft KQL reference, Cortex XQL reference) from local exports into chunks by command/function with metadata (language, command, version, url); embed into Chroma; implement llm.retrieve() per pipe stage with a language filter.
+3. RAG. DONE (keyword): siemx docs discover | fetch | build | search | retrieve | eval.
+   Retrieval per pipe stage: SPL doc by name, then target docs via Microsoft's official
+   Splunk-to-KQL cheat sheet ("bridge") and BM25 filtered to the target language.
+   Measured (siemx docs eval --ablation): skipping the base search and turning query
+   expansion OFF helped; KQL hit 0.21 -> 0.63, XQL 0.46 -> 0.50. Remaining misses are
+   renamed functions (len->strlen, rex->extract, head->take/limit).
+   NEXT: embeddings (Chroma) + hybrid ranking; keep it only if eval improves.
+   Do not build a bridge from the eval labels (evaluation leakage).
 4. gold/ format (JSONL: spl, kql, xql, notes, verified_by) and loader; feed nearest examples into the prompt.
 5. validate.py: real validation (KQL parser or dry-run; XQL dry-run if API available); feed errors into the retry loop.
 6. Field mapping: mappings/field_map.json (CIM <-> ASIM <-> XDM) applied to field names in
