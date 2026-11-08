@@ -6,6 +6,7 @@ dependencies = ["anthropic"]   # add chromadb later for RAG retrieval
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+rag = ["chromadb>=1.0"]   # optional: vector search (siemx docs embed)
 
 [project.scripts]
 siemx = "siemx.cli:main"

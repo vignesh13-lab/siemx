@@ -47,6 +47,9 @@ siemx/docs.py                   RAG step A: discover + fetch + clean (Splunk HTM
 siemx/chunking.py               RAG step B: heading-aware chunks with metadata
 siemx/retrieve.py               RAG step C: BM25, language filter, name lookup, official bridge
 siemx/rag_eval.py               RAG step E: hit / recall / MRR
+siemx/vectors.py                RAG step D (optional, pip install -e ".[rag]"): Chroma +
+                                local all-MiniLM-L6-v2 embeddings, RRF fusion; index in
+                                rag/index/chroma (siemx docs embed)
 
 ## How rule output works
 - A rule returns None (no faithful rule -> LLM fallback), a str, rules.Out (str + what it
@@ -87,7 +90,12 @@ pytest -q
    Measured (siemx docs eval --ablation): skipping the base search and turning query
    expansion OFF helped; KQL hit 0.21 -> 0.63, XQL 0.46 -> 0.50. Remaining misses are
    renamed functions (len->strlen, rex->extract, head->take/limit).
-   NEXT: embeddings (Chroma) + hybrid ranking; keep it only if eval improves.
+   Step D (optional extra [rag]): local embeddings in Chroma; vector query = first sentence
+   of the SPL command's own description; BM25 and vector rankings fused with RRF (k=60),
+   plus the best vector hit per SPL function added after the fused results.
+   Measured: vector-only is worse than BM25+bridge for KQL (0.54 vs 0.63); hybrid +
+   best-per-name keeps KQL at 0.63 and lifts XQL hit 0.50 -> 0.75 (no official XQL bridge).
+   Default mode = hybrid; falls back to BM25 when Chroma / the vector index is missing.
    Do not build a bridge from the eval labels (evaluation leakage).
 4. gold/ format (JSONL: spl, kql, xql, notes, verified_by) and loader; feed nearest examples into the prompt.
 5. validate.py: real validation (KQL parser or dry-run; XQL dry-run if API available); feed errors into the retry loop.

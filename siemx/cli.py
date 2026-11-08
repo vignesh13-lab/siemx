@@ -32,6 +32,8 @@ def main():
     f.add_argument("--limit", type=int, help="only the first N pages (for a quick test)")
     f.add_argument("--refresh", action="store_true", help="download again even if present")
     dsub.add_parser("build", help="split pages into chunks -> rag/index/chunks.jsonl")
+    dsub.add_parser("embed", help="vector index of the chunks -> rag/index/chroma "
+                                  '(needs pip install -e ".[rag]")')
     s = dsub.add_parser("search", help="BM25 search over the chunks (to explore retrieval)")
     s.add_argument("query")
     s.add_argument("--lang", choices=["spl", "kql", "xql"])
@@ -81,6 +83,13 @@ def _docs(a):
         (docs.index_dir() / "bridge.json").write_text(json.dumps(bridge, indent=1, sort_keys=True))
         stats["bridge"] = {t: len(m) for t, m in bridge.items()}
         print(json.dumps(stats))
+    elif a.docs_cmd == "embed":
+        from . import chunking, vectors
+        if not vectors.available():
+            raise SystemExit('chromadb is not installed: pip install -e ".[rag]"')
+        chunks = chunking.load(docs.index_dir() / "chunks.jsonl")
+        n = vectors.build(chunks, docs.index_dir() / "chroma")
+        print(json.dumps({"embedded": n}))
     elif a.docs_cmd == "eval":
         from . import rag_eval
         from . import retrieve as rag
@@ -90,13 +99,21 @@ def _docs(a):
         cases = rag_eval.load_cases(docs.rag_dir() / "eval.jsonl")
         if a.ablation:
             configs = [
-                ("v0 first version", rag.Options(skip_base=False, use_bridge=False, expansion_chars=600)),
-                ("+ skip base search", rag.Options(skip_base=True, use_bridge=False, expansion_chars=600)),
-                ("+ short expansion", rag.Options(skip_base=True, use_bridge=False, expansion_chars=200)),
-                ("+ no expansion", rag.Options(skip_base=True, use_bridge=False, expansion_chars=0)),
-                ("+ bridge, expansion", rag.Options(expansion_chars=200)),
-                ("+ bridge, no expansion", rag.Options(expansion_chars=0)),
+                ("v0 first version", rag.Options(skip_base=False, use_bridge=False, expansion_chars=600, mode="bm25")),
+                ("+ skip base search", rag.Options(skip_base=True, use_bridge=False, expansion_chars=600, mode="bm25")),
+                ("+ short expansion", rag.Options(skip_base=True, use_bridge=False, expansion_chars=200, mode="bm25")),
+                ("+ no expansion", rag.Options(skip_base=True, use_bridge=False, expansion_chars=0, mode="bm25")),
+                ("+ bridge, expansion", rag.Options(expansion_chars=200, mode="bm25")),
+                ("+ bridge, no expansion", rag.Options(expansion_chars=0, mode="bm25")),
             ]
+            if index.vec is not None:
+                configs += [
+                    ("vector only", rag.Options(mode="vector")),
+                    ("hybrid (BM25+vector)", rag.Options(mode="hybrid")),
+                    ("hybrid + best per name", rag.Options(mode="hybrid", per_name_best=True)),
+                ]
+            else:
+                print("(no vector index: run `siemx docs embed` to add vector/hybrid rows)")
             print(f"{'configuration':22} {'KQL hit':>8} {'recall':>7} {'mrr':>6} | {'XQL hit':>8} {'recall':>7} {'mrr':>6}")
             for label, opts in configs:
                 rep = rag_eval.evaluate(index, cases, lambda i, s, t: rag.retrieve(i, s, t, opts=opts))
