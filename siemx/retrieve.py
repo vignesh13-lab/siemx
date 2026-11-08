@@ -63,6 +63,8 @@ class BM25Index:
     def __init__(self, chunks: list[Chunk], bridge: dict | None = None):
         self.chunks = chunks
         self.bridge = bridge or {}            # {"kql": {"stats": ["summarize"], ...}}
+        self.by_id = {c.id: c for c in chunks}
+        self.vec = None                       # vectors.VectorIndex, attached by get_index()
         # title and names are part of the indexed text twice: field boosting
         self.docs = [Counter(tokens(f"{c.title} {' '.join(c.names)} " * 2 + c.text)) for c in chunks]
         self.lens = [sum(d.values()) for d in self.docs]
@@ -96,8 +98,12 @@ class BM25Index:
     def by_name(self, name: str, lang: str, k: int = TOP_SPL_PER_NAME) -> list[Chunk]:
         """Exact metadata lookup: chunks about command/function `name` (overview first)."""
         found = [c for c in self.chunks if c.lang == lang and name in c.names]
-        found.sort(key=lambda c: (c.names[0] != name, c.section not in ("Overview", "Description"),
-                                  c.id))
+
+        def rank(c):
+            last = c.section.split(" > ")[-1]           # "strftime(...) > Description"
+            return (c.names[0] != name, last not in ("Overview", "Description"),
+                    "example" in c.section.lower(), int(c.id.rsplit("#", 1)[1]))
+        found.sort(key=rank)
         return found[:k]
 
 
@@ -131,6 +137,11 @@ class Options:
     use_bridge: bool = True       # official SPL -> target name map (bridge.json)
     expansion_chars: int = 0      # SPL description text added to the hop-2 query (0 = off:
                                   # it hurt on the real corpus, see `docs eval --ablation`)
+    mode: str = "hybrid"          # "bm25" | "vector" | "hybrid"; hybrid won the ablation and
+                                  # falls back to BM25 when there is no vector index
+    pool: int = 20                # candidates per ranking before fusion
+    per_name_best: bool = True    # also keep the best vector hit of EACH SPL command/function
+                                  # (coverage: fusion alone favours chunks many rankings agree on)
 
 
 def first_sentence(chunk_text: str, limit: int) -> str:
@@ -167,14 +178,52 @@ def retrieve(index: BM25Index, spl: str, target: str, budget: int = BUDGET_CHARS
                 if c.id not in picked:
                     picked[c.id] = c
                     trace.append(f"stage {i}: bridge -> {target.upper()} '{t}' -> {c.id}")
-        # hop 2: target-language docs, query = stage text + start of the SPL description
+        # hop 2: target-language docs (BM25, vectors, or both fused with RRF)
         expansion = " ".join(first_sentence(t, opts.expansion_chars) for t in spl_context[:1])
         query = f"{st} {expansion}" if opts.expansion_chars else st
-        for h in index.search(query, lang=target, k=TOP_TARGET_PER_STAGE,
-                              names=set(names) | set(bridged)):
-            if h.chunk.id not in picked:
-                picked[h.chunk.id] = h.chunk
-                trace.append(f"stage {i}: {target.upper()} BM25 {h.score:.1f} -> {h.chunk.id}")
+        bm25 = index.search(query, lang=target, k=opts.pool, names=set(names) | set(bridged))
+        rankings, how = [], {}
+        if opts.mode in ("bm25", "hybrid"):
+            rankings.append([h.chunk.id for h in bm25])
+            how.update({h.chunk.id: f"BM25 {h.score:.1f}" for h in bm25})
+        best_per_name = []
+        if opts.mode in ("vector", "hybrid") and index.vec is not None:
+            # one query per SPL command/function: the first sentence of ITS description,
+            # compared with target docs written in the same descriptive style
+            for n in names:
+                spl_doc = index.by_name(n, "spl", k=1)
+                if not spl_doc:
+                    continue
+                vq = first_sentence(spl_doc[0].text, 300)
+                hits = index.vec.search(vq, lang=target, k=opts.pool)
+                rankings.append([cid for _, cid in hits])
+                for sim, cid in hits:
+                    how.setdefault(cid, f"vector {sim:.2f} via SPL '{n}'")
+                if hits:
+                    best_per_name.append((n, hits[0]))
+        from .vectors import rrf
+        fused = rrf(*rankings) if len(rankings) > 1 else [(0.0, c) for c in (rankings or [[]])[0]]
+        added = 0
+        for score, cid in fused:
+            if added == TOP_TARGET_PER_STAGE:
+                break
+            c = index.by_id.get(cid)
+            if c is None or cid in picked:
+                continue
+            picked[cid] = c
+            added += 1
+            label = how.get(cid, "")
+            if len(rankings) > 1:
+                label += f", RRF {score:.4f}"
+            trace.append(f"stage {i}: {target.upper()} {label} -> {cid}")
+        # coverage AFTER the fused results, so ranking quality (MRR) is kept
+        if opts.per_name_best:
+            for n, (sim, cid) in best_per_name:
+                c = index.by_id.get(cid)
+                if c is not None and cid not in picked:
+                    picked[cid] = c
+                    trace.append(f"stage {i}: {target.upper()} best vector for SPL '{n}' "
+                                 f"{sim:.2f} -> {cid}")
     docs, used = [], 0
     for c in picked.values():
         if used + c.chars > budget:
@@ -200,6 +249,8 @@ def get_index(chunks_file: Path) -> BM25Index | None:
         bridge_file = chunks_file.parent / "bridge.json"
         bridge = json.loads(bridge_file.read_text(encoding="utf-8")) if bridge_file.exists() else {}
         _INDEX[key] = BM25Index(load(chunks_file), bridge)
+        from . import vectors
+        _INDEX[key].vec = vectors.get_index(chunks_file.parent / "chroma")
     return _INDEX[key]
 
 
