@@ -160,3 +160,16 @@ def test_meta_records_provider_and_model(workspace, monkeypatch):
     pipeline.process_file(f, ["kql"], force=False)
     meta = json.loads((config.META_DIR / "windows" / "tx.kql.json").read_text())
     assert meta["model"] == "ollama:qwen2.5-coder:7b" and meta["status"] == "needs-review"
+
+
+def test_model_saying_unsupported_leaves_no_query(monkeypatch, tmp_path):
+    """A model that answers {"query": "unsupported", "unsupported": true} must not leave
+    that text in the output file or trigger validator noise."""
+    monkeypatch.setattr(llm, "cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(llm, "build_prompt", lambda *a, **k: "p")
+    monkeypatch.setattr(llm, "call_model", lambda p: {
+        "query": "unsupported", "confidence": 0, "unsupported": True,
+        "warnings": ["transaction has no XQL equivalent"]})
+    r = pipeline.llm_with_retry("index=a | transaction u", "xql")
+    assert r["query"] == "" and r["warnings"] == ["transaction has no XQL equivalent"]
+    assert pipeline.status_for(r) == "unsupported"
