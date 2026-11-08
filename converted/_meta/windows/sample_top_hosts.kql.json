@@ -1,0 +1,28 @@
+{
+  "src": "detections/spl/windows/sample_top_hosts.spl",
+  "client": null,
+  "mappings_hash": "d82d2f094bce8204",
+  "src_hash": "6b8ea45158ffe582",
+  "converter": "17",
+  "target": "kql",
+  "status": "needs-review",
+  "complexity": "simple",
+  "model": null,
+  "cached": false,
+  "ts": 1794127156,
+  "query_sha": "7c9324b0339590f8",
+  "confidence": 0.9,
+  "method": "rules",
+  "warnings": [
+    "KQL: field 'host' mapped to Computer (conditional: Splunk host = the machine that sent the event; equals the source computer only when the forwarder runs on it (not with Windows Event Forwarding collectors)); verify"
+  ],
+  "tokens": 0,
+  "validator": "official parser (Kusto.Language)",
+  "field_map": {
+    "host": {
+      "to": "Computer",
+      "level": "conditional"
+    }
+  },
+  "no_rule": null
+}
