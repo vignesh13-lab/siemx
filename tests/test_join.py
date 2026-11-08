@@ -23,6 +23,7 @@ def test_join_inner_kql(two_sources):
     r = rules.stage(f"join host {STATS_SUB}", "kql")
     assert r == ("join kind=inner (\n"
                  "    CommonSecurityLog\n"
+                 "    | where isnotempty(host)\n"
                  "    | summarize ['count'] = count() by host\n"
                  ") on host")
     assert isinstance(r, rules.Flagged)
@@ -32,6 +33,7 @@ def test_join_inner_kql(two_sources):
 def test_join_inner_xql(two_sources):
     r = rules.stage(f"join host {STATS_SUB}", "xql")
     assert r == ("join type = inner (dataset = proxy_raw\n"
+                 "    | filter host != null\n"
                  "    | comp count() as count by host\n"
                  "    | alter join_key_1 = host\n"
                  "    | fields - host) as sub sub.join_key_1 = host\n"
@@ -155,10 +157,11 @@ def test_join_end_to_end_rules(two_sources, no_llm):
            f"| join type=left host {STATS_SUB}")
     res = pipeline.convert_query(spl, "kql")
     assert res["method"] == "rules"
-    assert res["query"] == ("SecurityEvent\n| summarize ['count'] = count() by host\n"
+    assert res["query"] == ("SecurityEvent\n| where isnotempty(host)\n| summarize ['count'] = count() by host\n"
                             "| sort by ['count'] desc\n| take 10000\n"
                             "| join kind=leftouter (\n"
                             "    CommonSecurityLog\n"
+                            "    | where isnotempty(host)\n"
                             "    | summarize ['count'] = count() by host\n"
                             ") on host")
     assert pipeline.status_for(res) == "needs-review"

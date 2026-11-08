@@ -22,10 +22,10 @@ from siemx import rules
     ("head 10", "take 10", "limit 10"),
     # stats count: output column must be named `count`, as in SPL
     ("stats count", "summarize ['count'] = count()", "comp count() as count"),
-    ("stats count by host", "summarize ['count'] = count() by host",
-     "comp count() as count by host"),
-    ("stats count by host, user", "summarize ['count'] = count() by host, user",
-     "comp count() as count by host, user"),
+    ("stats count by host", "where isnotempty(host)\n| summarize ['count'] = count() by host",
+     "filter host != null\n| comp count() as count by host"),
+    ("stats count by host, user", "where isnotempty(host) and isnotempty(user)\n| summarize ['count'] = count() by host, user",
+     "filter host != null and user != null\n| comp count() as count by host, user"),
     # sort (single field); `count` is a KQL keyword -> quoted
     # sort: SPL default limit 10,000 is explicit (dropped when a smaller head follows)
     ("sort - count", "sort by ['count'] desc\n| take 10000", "sort desc count\n| limit 10000"),
@@ -90,7 +90,7 @@ def test_kql_name(name, quoted):
 
 def test_kql_names_quoted_in_project_and_by():
     assert rules.stage("table count, host", "kql") == "project ['count'], host"
-    assert rules.stage("stats count by where", "kql") == "summarize ['count'] = count() by ['where']"
+    assert rules.stage("stats count by where", "kql") == "where isnotempty(['where'])\n| summarize ['count'] = count() by ['where']"
     assert rules.stage("table count, host", "xql") == "fields count, host"
 
 

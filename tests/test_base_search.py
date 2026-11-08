@@ -129,7 +129,7 @@ def test_parse_meta():
 def test_base_search_reads_are_field_checked(env, no_llm):
     res = pipeline.convert_query(W + "EventCode=4625 | stats count by Computer", "kql")
     assert res["query"] == ("SecurityEvent\n| where EventCode == 4625\n"
-                            "| summarize ['count'] = count() by Computer")
+                            "| where isnotempty(Computer)\n| summarize ['count'] = count() by Computer")
     assert pipeline.status_for(res) == "needs-review"
     assert "EventCode" in res["warnings"][0] and "not in SecurityEvent" in res["warnings"][0]
 
@@ -140,6 +140,7 @@ def test_base_search_end_to_end_auto_approved(env, no_llm):
     assert res["query"] == (
         "SecurityEvent\n"
         '| where EventID == 4625 and (isnotempty(Account) and not(Account endswith "$"))\n'
+        "| where isnotempty(Computer)\n"
         "| summarize ['count'] = count() by Computer\n"
         "| where ['count'] > 20")
     assert pipeline.status_for(res) == "auto-approved"

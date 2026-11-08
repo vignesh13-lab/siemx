@@ -9,23 +9,23 @@ from siemx import pipeline, rules
 
 @pytest.mark.parametrize("spl, kql, xql", [
     ("stats count", "summarize ['count'] = count()", "comp count() as count"),
-    ("stats count by host", "summarize ['count'] = count() by host",
-     "comp count() as count by host"),
-    ("stats count as n by host", "summarize n = count() by host", "comp count() as n by host"),
+    ("stats count by host", "where isnotempty(host)\n| summarize ['count'] = count() by host",
+     "filter host != null\n| comp count() as count by host"),
+    ("stats count as n by host", "where isnotempty(host)\n| summarize n = count() by host", "filter host != null\n| comp count() as n by host"),
     ("stats c as n", "summarize n = count()", "comp count() as n"),
-    ("stats count(user) as n by host", "summarize n = countif(isnotempty(user)) by host",
-     "comp count(user) as n by host"),
-    ("stats sum(bytes) as total by host", "summarize total = sumif(bytes, isnotempty(bytes)) by host",
-     "comp sum(bytes) as total by host"),
+    ("stats count(user) as n by host", "where isnotempty(host)\n| summarize n = countif(isnotempty(user)) by host",
+     "filter host != null\n| comp count(user) as n by host"),
+    ("stats sum(bytes) as total by host", "where isnotempty(host)\n| summarize total = sumif(bytes, isnotempty(bytes)) by host",
+     "filter host != null\n| comp sum(bytes) as total by host"),
     ("stats avg(dur) as a, min(dur) as lo, max(dur) as hi",
      "summarize a = avgif(dur, isnotempty(dur)), lo = minif(dur, isnotempty(dur)), "
      "hi = maxif(dur, isnotempty(dur))",
      "comp avg(dur) as a, min(dur) as lo, max(dur) as hi"),
     ("stats count, max(t) as last by host, user",
-     "summarize ['count'] = count(), last = maxif(t, isnotempty(t)) by host, user",
-     "comp count() as count, max(t) as last by host, user"),
-    ("stats count BY host", "summarize ['count'] = count() by host",
-     "comp count() as count by host"),
+     "where isnotempty(host) and isnotempty(user)\n| summarize ['count'] = count(), last = maxif(t, isnotempty(t)) by host, user",
+     "filter host != null and user != null\n| comp count() as count, max(t) as last by host, user"),
+    ("stats count BY host", "where isnotempty(host)\n| summarize ['count'] = count() by host",
+     "filter host != null\n| comp count() as count by host"),
 ])
 def test_stats_clean(spl, kql, xql):
     k, x = rules.stage(spl, "kql"), rules.stage(spl, "xql")
@@ -35,15 +35,15 @@ def test_stats_clean(spl, kql, xql):
 
 def test_stats_dc_kql_flagged_preview():
     k = rules.stage("stats dc(user) as users by host", "kql")
-    assert k == "summarize users = count_distinctif(user, isnotempty(user)) by host"
+    assert k == "where isnotempty(host)\n| summarize users = count_distinctif(user, isnotempty(user)) by host"
     assert k.warnings == [rules.KQL_DC_WARNING]
     x = rules.stage("stats dc(user) as users by host", "xql")
-    assert (x, x.warnings) == ("comp count_distinct(user) as users by host", [])
+    assert (x, x.warnings) == ("filter host != null\n| comp count_distinct(user) as users by host", [])
 
 
 def test_stats_default_names_are_call_text():
     k = rules.stage("stats dc(user) by host", "kql")
-    assert k == "summarize ['dc(user)'] = count_distinctif(user, isnotempty(user)) by host"
+    assert k == "where isnotempty(host)\n| summarize ['dc(user)'] = count_distinctif(user, isnotempty(user)) by host"
     assert k.only == ["dc(user)", "host"]
     assert rules.stage("stats sum(bytes)", "kql") == "summarize ['sum(bytes)'] = sumif(bytes, isnotempty(bytes))"
     assert rules.stage("stats dc(user) by host", "xql") is None   # XQL name quoting unverified

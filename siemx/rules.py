@@ -292,8 +292,23 @@ def _stats(arg: str, target: str):
             parts.append(f"{xql_fn}({f or ''}) as {name}")
     by = f" by {_names(by_fields, target)}" if by_fields else ""
     op = "summarize" if target == "kql" else "comp"
-    text = f"{op} {', '.join(parts)}{by}"
+    text = drop_missing(by_fields, target) + f"{op} {', '.join(parts)}{by}"
     return Flagged(text, warnings, **fx) if warnings else Out(text, **fx)
+
+
+def drop_missing(fields: list[str], target: str) -> str:
+    """Filter stage that removes events missing any of the group-by fields.
+
+    SPL stats/top leave out events that do not have a BY field (verified on
+    Splunk: `| makeresults count=4 | streamstats count as n | eval host=if(n<=2,
+    "a", null()) | stats count by host` returns one row). KQL summarize and XQL
+    comp would put them in an empty/null group instead."""
+    if not fields:
+        return ""
+    if target == "kql":
+        cond = " and ".join(f"isnotempty({kql_name(f)})" for f in fields)
+        return f"where {cond}\n| "
+    return "filter " + " and ".join(f"{f} != null" for f in fields) + "\n| "
 
 
 # ---- sort -------------------------------------------------------------------------
@@ -587,11 +602,11 @@ def _top(arg: str, target: str):
     if target == "kql":
         c = kql_name(countfield)
         tail = f"top {limit} by {c} desc" if limit else f"sort by {c} desc"
-        text = f"summarize {c} = count() by {kql_name(f)}\n| {tail}"
+        text = drop_missing([f], target) + f"summarize {c} = count() by {kql_name(f)}\n| {tail}"
     else:
         if not _XQL_IDENT.fullmatch(f):
             return None
-        text = f"comp count() as {countfield} by {f}\n| sort desc {countfield}"
+        text = drop_missing([f], target) + f"comp count() as {countfield} by {f}\n| sort desc {countfield}"
         if limit:
             text += f"\n| limit {limit}"
     fx = dict(reads=[f], only=[f, countfield], order="sorts", unique=[f])
