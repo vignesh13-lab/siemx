@@ -104,6 +104,24 @@ def convert_elk(text: str, source: str = "spl") -> dict:
     return res
 
 
+def convert_from_elk(text: str, target: str) -> dict:
+    """Kibana KQL -> KQL / XQL (from_elk.py); a rule gap with a known table -> LLM."""
+    from . import from_elk
+    res = from_elk.convert(text, target)
+    if res.get("unsupported") and res.get("llm_base"):
+        gap = [w.removeprefix("not converted: ") for w in res["warnings"]]
+        res = llm_with_retry(text, target, source="elk", base=res["llm_base"])
+        res["no_rule"] = gap
+        if not res.get("unsupported"):
+            res.setdefault("warnings", []).append(
+                f"{target.upper()}: LLM translation keeps the Elastic field names; map them")
+        return res
+    if res.get("query"):
+        res["warnings"] += [f"validation: {p}" for p in validate.check(res["query"], target)]
+    res["validator"] = validate.status()[target]
+    return res
+
+
 W_XQL_JOIN_CASE = ("XQL: config case_sensitive = true was added for a string comparison; "
                    "whether it also applies to join keys is not documented; verify")
 W_XQL_SUB_CASE = ("XQL: a string comparison inside a join subquery is case-insensitive by "
@@ -212,6 +230,8 @@ def convert_any(text: str, target: str, source: str = "spl") -> dict:
         return convert_query(text, target)
     if source in ("kql", "xql") and target == "elk":
         return convert_elk(text, source)
+    if source == "elk" and target in ("kql", "xql"):
+        return convert_from_elk(text, target)
     if source in ("kql", "xql", "elk") and target == "spl":
         from . import reverse, reverse_elk, reverse_xql
         res = {"kql": reverse, "xql": reverse_xql, "elk": reverse_elk}[source].convert(text)

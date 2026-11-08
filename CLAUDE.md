@@ -203,6 +203,14 @@ pytest -q
    operator semantics. Field names chain through field_map.json: source column -> Splunk
    field (exact kql/xql entry) -> Elastic field ("elk" entry). Gaps (has, regex, ...) go to
    the LLM with build_to_elk_prompt (no base search).
+12. DONE ELK -> KQL / XQL directly (siemx/from_elk.py; `--from elk --to kql,xql`). Table from
+   the sources.json entry with the same "elk" index pattern (`# index:` header required; no
+   header / no mapping -> unsupported, never the LLM). Keyword semantics kept: KQL == /
+   contains_cs / startswith_cs / endswith_cs / matches regex "^...$"; XQL with
+   `config case_sensitive = true` when strings are compared. Flagged: text-field word
+   matching, isnotempty vs `f: *` and "", XQL not/null handling. XQL needs plain field
+   names: an unmapped dotted ECS name -> unsupported (map it). Field names chain through
+   field_map.json (Elastic -> Splunk via exact "elk" entries -> target).
 
 ## Open questions (need a human with access)
 - Elastic: index patterns per sourcetype and the ECS field names in use (field_map.json "elk").

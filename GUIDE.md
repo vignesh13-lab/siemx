@@ -176,7 +176,13 @@ siemx convert --to elk                # detections/spl -> converted/elk/*.elk
 siemx convert --from kql --to elk     # detections/kql (Sentinel) -> converted/elk
 siemx convert --from xql --to elk     # detections/xql (Cortex)   -> converted/elk
 siemx convert --from elk              # detections/elk/*.elk -> converted/spl/*.spl
+siemx convert --from elk --to kql,xql # detections/elk -> converted/kql, converted/xql
 ```
+
+Elastic to Sentinel / Cortex needs the `# index:` line (below) and a `sources.json` entry
+that has both `"elk"` and `"kql"` / `"xql"`: that is how siemx knows the table. Elastic
+matches exactly and case-sensitively, so KQL gets `==`, `contains_cs`, `startswith_cs`, and
+XQL starts with `config case_sensitive = true`.
 
 KQL and XQL go to Elastic directly, not through SPL. The same rules apply as below:
 `where` / `filter` convert, `project` / `fields` / `sort` are dropped with a note, and
