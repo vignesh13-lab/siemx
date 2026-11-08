@@ -138,6 +138,8 @@ def retry_request(spl: str, target: str, previous: str, problems: list[str]) -> 
 def status_for(res: dict) -> str:
     if res.get("unsupported") or not res.get("query"):
         return "unsupported"
+    if res.get("method", "").startswith("llm") and not config.LLM_AUTO_APPROVE:
+        return "needs-review"
     if res["warnings"] or res["confidence"] < config.CONF_AUTO_APPROVE:
         return "needs-review"
     return "auto-approved"
@@ -223,7 +225,7 @@ def process_file(path, targets, force, map_hash=None, source="spl"):
                 "client": config.CLIENT, "mappings_hash": map_hash,
                 "src_hash": h, "converter": config.CONVERTER_VERSION, "target": t, "status": st,
                 "complexity": triage.complexity(spl),
-                "model": llm.MODEL if res.get("method", "").startswith("llm") else None,
+                "model": llm.model_id() if res.get("method", "").startswith("llm") else None,
                 "cached": bool(res.get("cached")),
                 "ts": int(time.time()), "query_sha": sha(res.get("query", "")),
                 **{k: res.get(k) for k in ("confidence", "method", "warnings", "tokens",

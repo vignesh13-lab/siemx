@@ -1,4 +1,23 @@
-"""RAG + Claude fallback for stages the rules cannot handle."""
+"""RAG + LLM fallback for stages the rules cannot handle.
+
+The model is a setting (environment variables, read at call time), not code:
+
+  SIEMX_PROVIDER  anthropic (default) | ollama | openai
+  SIEMX_MODEL     model name; required for ollama / openai
+                    anthropic: default claude-sonnet-5-5, key in ANTHROPIC_API_KEY
+                    ollama:    e.g. qwen2.5-coder:7b (local, no key, nothing leaves the PC)
+                    openai:    any OpenAI-compatible chat API (OpenAI, Azure OpenAI v1
+                               endpoint, company gateways, vLLM, LM Studio)
+  SIEMX_BASE_URL  ollama: default http://localhost:11434 ; openai: default
+                  https://api.openai.com/v1
+  SIEMX_API_KEY   key for openai (falls back to OPENAI_API_KEY)
+  SIEMX_NUM_CTX   ollama context window in tokens (default 16384). Ollama's own default
+                  is small and it silently cuts long prompts; a cut prompt is reported.
+  SIEMX_TIMEOUT   seconds per request (default 600: local models are slow)
+
+Every result records which model produced it, and the cache key includes it, so
+switching models never reuses another model's answers.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -9,7 +28,32 @@ from pathlib import Path
 
 from . import config
 
-MODEL = os.environ.get("SIEMX_MODEL", "claude-sonnet-5-5")
+MODEL = os.environ.get("SIEMX_MODEL") or "claude-sonnet-5-5"     # anthropic default
+PROVIDERS = ("anthropic", "ollama", "openai")
+DEFAULT_URLS = {"ollama": "http://localhost:11434", "openai": "https://api.openai.com/v1"}
+
+
+def settings() -> dict:
+    """The current model setting, from the environment (empty values = unset)."""
+    env = {k: (os.environ.get(k) or "").strip() for k in
+           ("SIEMX_PROVIDER", "SIEMX_MODEL", "SIEMX_BASE_URL", "SIEMX_NUM_CTX", "SIEMX_TIMEOUT")}
+    provider = (env["SIEMX_PROVIDER"] or "anthropic").lower()
+    if provider not in PROVIDERS:
+        raise ValueError(f"SIEMX_PROVIDER={provider!r}: use one of {', '.join(PROVIDERS)}")
+    model = env["SIEMX_MODEL"] or (MODEL if provider == "anthropic" else "")
+    return {"provider": provider, "model": model,
+            "base_url": (env["SIEMX_BASE_URL"] or DEFAULT_URLS.get(provider, "")).rstrip("/"),
+            "num_ctx": int(env["SIEMX_NUM_CTX"] or 16384),
+            "timeout": float(env["SIEMX_TIMEOUT"] or 600)}
+
+
+def model_id() -> str:
+    """Recorded in each result's metadata: 'claude-sonnet-5-5', 'ollama:qwen2.5-coder:7b'."""
+    try:
+        s = settings()
+    except ValueError:
+        return "invalid SIEMX_PROVIDER"
+    return s["model"] if s["provider"] == "anthropic" else f"{s['provider']}:{s['model']}"
 NAMES = {"kql": "KQL (Microsoft Sentinel / Defender)", "xql": "XQL (Palo Alto Cortex XDR/XSIAM)",
          "spl": "SPL (Splunk)"}
 
@@ -128,7 +172,11 @@ def cache_dir() -> Path:
 
 
 def cache_key(prompt: str) -> str:
-    blob = json.dumps({"model": MODEL, "system": SYSTEM, "prompt": prompt}, sort_keys=True)
+    s = settings()
+    blob = {"model": s["model"], "system": SYSTEM, "prompt": prompt}
+    if s["provider"] != "anthropic":          # anthropic keys unchanged: old cache stays valid
+        blob.update(provider=s["provider"], base_url=s["base_url"])
+    blob = json.dumps(blob, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
@@ -156,16 +204,82 @@ def _well_formed(out) -> bool:
 
 
 def call_model(prompt: str) -> dict:
-    """One Anthropic call -> parsed JSON dict (raises on any failure)."""
+    """One model call -> parsed JSON dict (raises on any failure; translate() turns a
+    failure into an unsupported result for review)."""
+    s = settings()
+    if not s["model"]:
+        raise ValueError(f"set SIEMX_MODEL for provider {s['provider']}")
+    return {"anthropic": _call_anthropic, "ollama": _call_ollama,
+            "openai": _call_openai}[s["provider"]](prompt, s)
+
+
+def parse_json(text: str) -> dict:
+    """The model's JSON answer; tolerates ``` fences and text around the object."""
+    text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        return json.loads(text[start:end + 1])
+
+
+def _call_anthropic(prompt: str, s: dict) -> dict:
     import anthropic
     client = anthropic.Anthropic()
     resp = client.messages.create(
-        model=MODEL, max_tokens=2000, system=SYSTEM,
+        model=s["model"], max_tokens=2000, system=SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )
-    text = resp.content[0].text.strip().removeprefix("```json").removesuffix("```").strip()
-    out = json.loads(text)
+    out = parse_json(resp.content[0].text)
     out["tokens"] = resp.usage.input_tokens + resp.usage.output_tokens
+    return out
+
+
+def _post(url: str, body: dict, headers: dict, timeout: float) -> dict:
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", **headers})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"HTTP {e.code} from {url}: {e.read().decode('utf-8', 'replace')[:300]}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"cannot reach {url}: {e.reason}")
+
+
+def _messages(prompt: str) -> list[dict]:
+    return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}]
+
+
+def _call_ollama(prompt: str, s: dict) -> dict:
+    """Ollama's native chat API: it accepts the context size (num_ctx) and reports how
+    many prompt tokens it read, so a silently cut prompt is detected."""
+    resp = _post(f"{s['base_url']}/api/chat",
+                 {"model": s["model"], "messages": _messages(prompt), "stream": False,
+                  "format": "json", "options": {"temperature": 0, "num_ctx": s["num_ctx"]}},
+                 {}, s["timeout"])
+    out = parse_json(resp["message"]["content"])
+    read = resp.get("prompt_eval_count") or 0
+    if read >= s["num_ctx"]:
+        raise ValueError(f"prompt cut at the context limit ({read} tokens); raise SIEMX_NUM_CTX")
+    out["tokens"] = read + (resp.get("eval_count") or 0)
+    return out
+
+
+def _call_openai(prompt: str, s: dict) -> dict:
+    key = os.environ.get("SIEMX_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    resp = _post(f"{s['base_url']}/chat/completions",
+                 {"model": s["model"], "messages": _messages(prompt), "temperature": 0,
+                  "max_tokens": 2000, "response_format": {"type": "json_object"}},
+                 headers, s["timeout"])
+    out = parse_json(resp["choices"][0]["message"]["content"])
+    usage = resp.get("usage") or {}
+    out["tokens"] = (usage.get("prompt_tokens") or 0) + (usage.get("completion_tokens") or 0)
     return out
 
 

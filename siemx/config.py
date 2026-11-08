@@ -19,9 +19,13 @@ CLIENT: str | None = None
 
 EXT = {"kql": ".kql", "xql": ".xql", "spl": ".spl"}
 CONF_AUTO_APPROVE = 0.85   # at or above this -> auto-approved
+# LLM results are never auto-approved until the pilot shows the model's own confidence
+# can be trusted (`siemx report`: accuracy of auto-approved). A local 7B model reported
+# 0.9 for answers that dropped a `by` clause. Turn on per model, after measuring.
+LLM_AUTO_APPROVE = False
 
 # Bump whenever rules/prompts change output, so unchanged SPL is re-converted.
-CONVERTER_VERSION = "20"   # 20: XQL config case_sensitive for where/eval string comparisons
+CONVERTER_VERSION = "21"   # 21: LLM results never auto-approved (LLM_AUTO_APPROVE)
 
 
 def set_client(name: str | None) -> None:

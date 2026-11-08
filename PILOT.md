@@ -15,10 +15,39 @@ Questions 2 and 4 need human review. Plan about 15 minutes per detection per tar
 | | Why | How |
 |---|---|---|
 | **Private repository** | Real detections and client index names must not be public | Create a private repo or move this one |
-| `ANTHROPIC_API_KEY` | Detections without rules go to the LLM | Repo secret (CI) or environment variable (local) |
+| An LLM | Detections without rules go to the LLM | Choose with environment variables (local) or repository **variables** (CI); see "Choosing the LLM" below |
 | Official KQL parser | Validates every KQL output | `npm ci --prefix tools/kql-validate` |
 | Docs index (optional, better LLM output) | RAG over the official docs | `siemx docs discover && siemx docs fetch && siemx docs build`; vectors: `pip install -e ".[rag]"` and `siemx docs embed` |
 | Client mappings | Index names, macros and field names differ per client | `mappings/clients/<client>/sources.json` and `macros.json`; field map: `siemx fields import-props <props.conf> --stanza "XmlWinEventLog:Security" --client <client> --table SecurityEvent` |
+
+### Choosing the LLM
+
+The model is a setting, not code. Locally: environment variables. In CI: repository
+variables (Settings -> Secrets and variables -> Actions -> **Variables**); keys always as
+**secrets**.
+
+| Setting | Open-source, local (now) | Paid API (later) |
+|---|---|---|
+| `SIEMX_PROVIDER` | `ollama` | `anthropic`, or `openai` for any OpenAI-compatible API (Azure OpenAI v1, OpenAI, company gateway) |
+| `SIEMX_MODEL` | e.g. `qwen2.5-coder:7b` | e.g. `claude-sonnet-5-5` |
+| `SIEMX_BASE_URL` | default `http://localhost:11434` | `openai` only: the API address |
+| key | none | secret `ANTHROPIC_API_KEY`, or `SIEMX_API_KEY` for `openai` |
+
+PowerShell, one session:
+
+```
+$env:SIEMX_PROVIDER = "ollama"; $env:SIEMX_MODEL = "qwen2.5-coder:7b"
+siemx convert --client <client> --to kql,xql
+```
+
+Ollama runs on your PC only: nothing leaves it, but GitHub's cloud CI cannot reach it
+(convert locally, or use a self-hosted runner). Each result records its model, so a
+second model can be compared on the same 50 detections with `siemx report`.
+
+LLM results are **never auto-approved** (`LLM_AUTO_APPROVE = False` in
+`siemx/config.py`) until the pilot shows that model's confidence can be trusted. In a
+first test, `qwen2.5-coder:7b` answered with confidence 0.9 while dropping a `by host`
+clause and `transaction ... maxspan=5m`: valid syntax, different meaning.
 
 ## 2. Pick the 50
 

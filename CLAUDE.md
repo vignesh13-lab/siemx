@@ -69,7 +69,13 @@ siemx/vectors.py                RAG step D (optional, pip install -e ".[rag]"): 
 - Every new rule needs a test in tests/ with an SPL input and the expected KQL and XQL.
 - Keep statuses: auto-approved / needs-review / unsupported. Do not loosen the thresholds in config.py silently.
 - Do not call the LLM for stages a rule can handle. Cache LLM results by query hash.
-- Never commit API keys. ANTHROPIC_API_KEY comes from env / CI secrets.
+- Never commit API keys. ANTHROPIC_API_KEY / SIEMX_API_KEY come from env / CI secrets.
+- The LLM is a setting (siemx/llm.py docstring): SIEMX_PROVIDER anthropic | ollama |
+  openai (any OpenAI-compatible API), SIEMX_MODEL, SIEMX_BASE_URL; CI reads them from
+  repository variables. Anthropic cache keys are unchanged; other providers add
+  provider + base_url to the key. Meta records llm.model_id().
+- LLM results are never auto-approved (config.LLM_AUTO_APPROVE = False) until the pilot
+  shows the model's confidence is trustworthy. Do not turn it on without that data.
 - Python 3.10+, type hints, small functions, no heavy frameworks.
 
 ## Commands
