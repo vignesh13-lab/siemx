@@ -36,12 +36,12 @@ def test_translate_no_warnings(spl, kql, xql):
         assert x is not None and x.text == xql and x.warnings == []
 
 
-def test_string_literal_kql_clean_xql_flagged():
+def test_string_literal_kql_clean_xql_marked():
     k = expr.translate('user="admin"', "kql")
     assert (k.text, k.warnings) == ('user == "admin"', [])
     x = expr.translate('user="admin"', "xql")
     assert x.text == 'user = "admin"'
-    assert len(x.warnings) == 1 and "case sensitivity" in x.warnings[0]
+    assert x.warnings == [expr.XQL_CASE_SENSITIVE]
 
 
 def test_string_escapes_kept_for_kql():

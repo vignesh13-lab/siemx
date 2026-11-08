@@ -147,12 +147,24 @@ def test_flagged_rule_output_is_needs_review(sources_map, no_llm):
     assert kql["query"] == ("SecurityEvent\n| where user == \"admin\"\n"
                             "| where isnotempty(host)\n| summarize ['count'] = count() by host")
     assert pipeline.status_for(kql) == "auto-approved"
+    spl = 'index=wineventlog | where user!="admin" | stats count by host'      # flagged: !=
 
     xql = pipeline.convert_query(spl, "xql")
-    assert xql["query"] == ("dataset = xdr_data\n| filter user = \"admin\"\n"
-                            "| filter host != null\n| comp count() as count by host")
-    assert xql["method"] == "rules" and xql["warnings"]
+    assert xql["method"] == "rules" and xql["warnings"]           # != caveat
     assert pipeline.status_for(xql) == "needs-review"
+
+
+def test_xql_string_comparison_runs_case_sensitive(sources_map, no_llm):
+    """SPL where == is case-sensitive; XQL is not by default (stages/config.md)."""
+    xql = pipeline.convert_query('index=wineventlog | where user="admin" | stats count by host', "xql")
+    assert xql["query"] == ("config case_sensitive = true\n| dataset = xdr_data\n"
+                            "| filter user = \"admin\"\n"
+                            "| filter host != null\n| comp count() as count by host")
+    assert xql["warnings"] == [] and pipeline.status_for(xql) == "auto-approved"
+    # search terms lowercase both sides, so they need no switch
+    plain = pipeline.convert_query("index=wineventlog user=Admin | stats count by host", "xql")
+    assert not plain["query"].startswith("config")
+    assert 'lowercase(user) = "admin"' in plain["query"]
 
 
 @pytest.mark.parametrize("res, status", [

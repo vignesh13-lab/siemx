@@ -164,9 +164,13 @@ pytest -q
    XQL column: the cells hold the SPL query's tail), and a bridge from our own rules
    would make the eval circular. Docs alone: hybrid hit 0.45; gold examples read
    backwards: hit 0.95; prompt shows every expected SPL command (docs OR examples) 0.95.
-   FOLLOW-UP: forward SPL -> XQL warns "XQL case sensitivity not documented"; it IS
-   documented (default insensitive): SPL where == is case-sensitive, so the forward
-   output over-matches; consider emitting `config case_sensitive = true`.
+   FIXED (converter 20): forward SPL -> XQL. A where/eval string comparison (SPL:
+   case-sensitive) now starts the XQL with `config case_sensitive = true` (config.md:
+   default false) instead of a "verify" warning; search terms already lowercase both
+   sides and need no switch. Inside a join subquery: review warning (whether config
+   reaches into a join is not documented); with a join elsewhere: warning that the
+   switch may also affect join keys. The forward LLM prompt states this for XQL only
+   (KQL prompt text unchanged, its cache stays valid).
 8. DONE siemx report (siemx/report.py): converted/<client>/_report/report.md + summary.csv
    (summary per source, warning categories, SPL commands without rules, review accuracy by
    status/method/target/command, LLM auto-approval threshold analysis), --mkdocs writes a

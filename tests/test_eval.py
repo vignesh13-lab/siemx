@@ -143,10 +143,10 @@ def test_where_with_values(spl, kql, xql):
     assert expr.translate(spl, "xql").text == xql
 
 
-def test_where_lower_compared_to_string_flagged_for_xql():
+def test_where_lower_compared_to_string_marked_for_xql():
     r = expr.translate('lower(user) = "admin"', "xql")
     assert r.text == 'lowercase(user) = "admin"'
-    assert any("case sensitivity" in w for w in r.warnings)
+    assert expr.XQL_CASE_SENSITIVE in r.warnings      # -> config case_sensitive = true
 
 
 # ---- end to end -----------------------------------------------------------------

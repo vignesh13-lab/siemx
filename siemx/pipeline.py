@@ -1,6 +1,7 @@
 import hashlib
 from pathlib import Path
 import json
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -70,6 +71,8 @@ def convert_query(spl: str, target: str) -> dict:
         q = "\n| ".join(render_parts(parts))
         # rules.Flagged parts carry warnings -> status_for() marks needs-review
         warnings = [w for part in parts for w in getattr(part, "warnings", [])]
+        if target == "xql":
+            q, warnings = xql_case_mode(q, warnings)
         warnings += map_warnings                       # conditional / ambiguous field names
         warnings += schema.check(parts, target)        # unknown field names -> review
         warnings += schema.order_check(parts, target)  # order-dependent stages -> review
@@ -81,6 +84,28 @@ def convert_query(spl: str, target: str) -> dict:
     out = llm_with_retry(spl, target)
     out["no_rule"] = missing_rules(spl, target)
     return out
+
+
+W_XQL_JOIN_CASE = ("XQL: config case_sensitive = true was added for a string comparison; "
+                   "whether it also applies to join keys is not documented; verify")
+W_XQL_SUB_CASE = ("XQL: a string comparison inside a join subquery is case-insensitive by "
+                  "default (SPL: case-sensitive); whether config case_sensitive applies inside "
+                  "a join is not documented; verify")
+
+
+def xql_case_mode(q: str, warnings: list[str]) -> tuple[str, list[str]]:
+    """SPL where/eval string comparison is case-sensitive, XQL's default is not
+    (stages/config.md): start the query with `config case_sensitive = true`."""
+    from .expr import XQL_CASE_SENSITIVE
+    # inside a join subquery the marker arrives prefixed ("subsearch: ..."): keep it for review
+    warnings = [W_XQL_SUB_CASE if w != XQL_CASE_SENSITIVE and w.endswith(XQL_CASE_SENSITIVE)
+                else w for w in warnings]
+    if XQL_CASE_SENSITIVE not in warnings:
+        return q, list(dict.fromkeys(warnings))
+    warnings = list(dict.fromkeys(w for w in warnings if w != XQL_CASE_SENSITIVE))
+    if re.search(r"(?m)^\|\s*join\b", q):
+        warnings.append(W_XQL_JOIN_CASE)
+    return "config case_sensitive = true\n| " + q, warnings
 
 
 def llm_with_retry(text: str, target: str, source: str = "spl", base: str | None = None) -> dict:

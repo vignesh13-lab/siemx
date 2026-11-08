@@ -70,9 +70,19 @@ def build_prompt(spl: str, target: str, source: str = "spl", base: str | None = 
         f"{json.dumps(ctx.get('field_map', {}), ensure_ascii=False)}\n\n"
         "Use only syntax shown in the reference docs or the verified examples. If something "
         "you need is not covered by them, add a warning instead of guessing.\n"
+        f"{FORWARD_PITFALLS.get(target, '')}"
         'Return JSON: {"query": str, "confidence": 0-1, "warnings": [str], '
         '"unsupported": bool, "sources": [the URLs of the docs you relied on]}'
     )
+
+
+# Target-specific facts for the forward prompt. KQL has none, so its prompt text (and its
+# cached answers) stay unchanged.
+FORWARD_PITFALLS = {
+    "xql": ("XQL string comparison is case-insensitive by default; SPL where/eval comparison "
+            "is case-sensitive (search terms are not). If the SPL compares strings in where or "
+            "eval, start the XQL with `config case_sensitive = true`.\n"),
+}
 
 
 REVERSE_PITFALLS = {

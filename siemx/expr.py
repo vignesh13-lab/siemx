@@ -24,7 +24,11 @@ XQL (cortex-docs .../xql-command-reference-guide/readme): stages/filter, functio
   conversion -> to_string(); NULL if any arg is NULL), if, len, lowercase,
   uppercase, coalesce
   - "..." treats `*` as a wildcard; escapes only in triple quotes
-  - case sensitivity of string `=` is not documented -> flagged
+  - string comparison is case-INSENSITIVE by default (stages/config.md: case_sensitive
+    "controls whether field values are evaluated in a case-sensitive manner. Default is
+    false"); SPL where/eval comparison is case-sensitive, so a string comparison marks the
+    query with XQL_CASE_SENSITIVE and pipeline.py starts it with
+    `config case_sensitive = true` (search terms are unaffected: they lowercase both sides)
 """
 from __future__ import annotations
 
@@ -64,7 +68,8 @@ W_DIV = ("{T}: division by a field; SPL returns null on division by zero, "
          "target behaviour not verified; verify")
 W_NE = ("{T}: != null handling may differ from SPL "
         "(SPL drops events where the field is missing); verify")
-W_XQL_STR = "XQL: case sensitivity of string comparison is not documented; verify"
+# a marker, not a review warning: pipeline.convert_query removes it and adds the config stage
+XQL_CASE_SENSITIVE = "XQL: needs config case_sensitive = true"
 
 
 @dataclass
@@ -351,7 +356,7 @@ class _Renderer:
             if op == "!=":
                 self.warn(W_NE)
             if self.target == "xql" and "str" in (self.typeof(left), self.typeof(right)):
-                self.warn(W_XQL_STR)
+                self.warn(XQL_CASE_SENSITIVE)
             if op in ("=", "=="):
                 op = "==" if self.target == "kql" else "="
             return f"{self.operand(left)} {op} {self.operand(right)}"
