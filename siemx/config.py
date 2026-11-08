@@ -13,4 +13,4 @@ EXT = {"kql": ".kql", "xql": ".xql"}
 CONF_AUTO_APPROVE = 0.85   # at or above this -> auto-approved
 
 # Bump whenever rules/prompts change output, so unchanged SPL is re-converted.
-CONVERTER_VERSION = "8"
+CONVERTER_VERSION = "14"

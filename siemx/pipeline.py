@@ -11,6 +11,20 @@ def sha(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
+def render_parts(parts: list) -> list[str]:
+    """Query text per stage. A sort's implicit SPL limit (10,000) is dropped when
+    the next stage is a head that takes no more rows than that limit."""
+    out = []
+    for i, part in enumerate(parts):
+        nxt = parts[i + 1] if i + 1 < len(parts) else None
+        limit, take_n = getattr(part, "limit", None), getattr(nxt, "take_n", None)
+        if limit and take_n is not None and take_n <= limit:
+            out.append(part.without_limit)
+        else:
+            out.append(str(part))
+    return out
+
+
 def convert_query(spl: str, target: str) -> dict:
     stages = triage.split_stages(spl)
     # 1) rules first
@@ -18,7 +32,7 @@ def convert_query(spl: str, target: str) -> dict:
     rest = [rules.stage(s, target) for s in stages[1:]]
     if head and all(r is not None for r in rest):
         parts = [head] + rest
-        q = "\n| ".join(parts)
+        q = "\n| ".join(render_parts(parts))
         # rules.Flagged parts carry warnings -> status_for() marks needs-review
         warnings = [w for part in parts for w in getattr(part, "warnings", [])]
         warnings += schema.check(parts, target)        # unknown field names -> review
@@ -72,7 +86,9 @@ def process_file(path, targets, force):
         config.META_DIR.mkdir(parents=True, exist_ok=True)
         meta = {"src": (config.SRC_REL / path.relative_to(config.SRC_DIR)).as_posix(),
                 "src_hash": h, "converter": config.CONVERTER_VERSION, "target": t, "status": st,
-                "complexity": triage.complexity(spl), "model": llm.MODEL,
+                "complexity": triage.complexity(spl),
+                "model": llm.MODEL if res.get("method", "").startswith("llm") else None,
+                "cached": bool(res.get("cached")),
                 "ts": int(time.time()),
                 **{k: res.get(k) for k in ("confidence", "method", "warnings", "tokens")}}
         meta_path.write_text(json.dumps(meta, indent=2))

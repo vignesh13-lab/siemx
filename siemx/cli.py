@@ -22,8 +22,11 @@ def main():
     elif a.cmd == "status":
         print(json.dumps(pipeline.status(), indent=2))
     elif a.cmd == "review":
-        for m in pipeline.review_list():
-            print(f"{m['status']:13} {m['target']}  {m['src']}  conf={m.get('confidence')}")
+        for m in sorted(pipeline.review_list(), key=lambda m: (m["src"], m["target"])):
+            print(f"{m['status']:13} {m['target']}  {m['src']}  conf={m.get('confidence')}"
+                  f"  method={m.get('method')}")
+            for w in m.get("warnings") or []:
+                print(f"    - {w}")
 
 
 if __name__ == "__main__":

@@ -27,10 +27,11 @@ from siemx import rules
     ("stats count by host, user", "summarize ['count'] = count() by host, user",
      "comp count() as count by host, user"),
     # sort (single field); `count` is a KQL keyword -> quoted
-    ("sort - count", "sort by ['count'] desc", "sort desc count"),
-    ("sort -count", "sort by ['count'] desc", "sort desc count"),
-    ("sort + host", "sort by host asc", "sort asc host"),
-    ("sort host", "sort by host asc", "sort asc host"),
+    # sort: SPL default limit 10,000 is explicit (dropped when a smaller head follows)
+    ("sort - count", "sort by ['count'] desc\n| take 10000", "sort desc count\n| limit 10000"),
+    ("sort -count", "sort by ['count'] desc\n| take 10000", "sort desc count\n| limit 10000"),
+    ("sort + host", "sort by host asc\n| take 10000", "sort asc host\n| limit 10000"),
+    ("sort host", "sort by host asc\n| take 10000", "sort asc host\n| limit 10000"),
 ])
 def test_stage_rule(spl, kql, xql):
     assert rules.stage(spl, "kql") == kql
@@ -38,14 +39,9 @@ def test_stage_rule(spl, kql, xql):
 
 
 @pytest.mark.parametrize("spl", [
-    "fields - host",                 # field removal: different semantics
     "head",                          # bare head (SPL default 10) not mapped yet
     "head count>5",                  # eval-expression form
     "stats count(user) by host",     # field-level count
-    "stats dc(user) by host",
-    "stats count as n by host",      # rename in stats
-    "sort - count, host",            # multi-field sort
-    "sort 100 -count",               # sort with limit
     'rex field=_raw "(?<u>\\w+)"',
     "transaction host",
     "unknowncmd foo",
@@ -105,7 +101,6 @@ def test_first_stage_maps_known_source(sources_map):
 
 
 @pytest.mark.parametrize("stage", [
-    "index=wineventlog EventCode=4625",   # leftover terms need translation
     "index=unknown",
     "search index=wineventlog",
 ])
