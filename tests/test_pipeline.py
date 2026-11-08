@@ -20,8 +20,8 @@ def write_spl(text=SPL, name="top_hosts", sub="windows"):
     return f
 
 
-def meta(name, target):
-    return json.loads((config.META_DIR / f"{name}.{target}.json").read_text())
+def meta(name, target, sub="windows"):
+    return json.loads((config.META_DIR / sub / f"{name}.{target}.json").read_text())
 
 
 @pytest.mark.parametrize("target", ["kql", "xql"])
@@ -61,8 +61,8 @@ def test_converter_version_change_reconverts(workspace, no_llm, monkeypatch):
 def test_old_meta_without_converter_is_reconverted(workspace, no_llm):
     """Meta written before the converter field existed counts as stale."""
     f = write_spl()
-    config.META_DIR.mkdir(parents=True)
-    (config.META_DIR / "top_hosts.kql.json").write_text(
+    (config.META_DIR / "windows").mkdir(parents=True)
+    (config.META_DIR / "windows" / "top_hosts.kql.json").write_text(
         json.dumps({"src_hash": pipeline.sha(SPL), "status": "auto-approved"}))
     assert pipeline.process_file(f, ["kql"], force=False)[0]["status"] == "auto-approved"
 

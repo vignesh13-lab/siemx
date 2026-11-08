@@ -1,23 +1,33 @@
 import argparse
 import json
-from . import pipeline
+import os
+
+from . import config, pipeline
 
 
 def main():
     p = argparse.ArgumentParser(prog="siemx")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    c = sub.add_parser("convert", help="convert detections/spl/** (skips unchanged files)")
+    client = argparse.ArgumentParser(add_help=False)
+    client.add_argument("--client", default=os.environ.get("SIEMX_CLIENT"),
+                        help="use mappings/clients/<client>/ and write to converted/<client>/ "
+                             "(default: $SIEMX_CLIENT, else shared mappings only)")
+
+    c = sub.add_parser("convert", parents=[client],
+                       help="convert detections/spl/** (skips unchanged files)")
     c.add_argument("--to", default="kql,xql")
     c.add_argument("--workers", type=int, default=4)
     c.add_argument("--force", action="store_true")
+    c.add_argument("--path", help="only convert detections/spl/<path>/** (e.g. a client folder)")
 
-    sub.add_parser("status", help="counts per status")
-    sub.add_parser("review", help="list needs-review / unsupported")
+    sub.add_parser("status", parents=[client], help="counts per status")
+    sub.add_parser("review", parents=[client], help="list needs-review / unsupported")
 
     a = p.parse_args()
+    config.set_client(a.client)
     if a.cmd == "convert":
-        counts = pipeline.run(a.to.split(","), a.workers, a.force)
+        counts = pipeline.run(a.to.split(","), a.workers, a.force, a.path)
         print(json.dumps({"summary": counts}))
     elif a.cmd == "status":
         print(json.dumps(pipeline.status(), indent=2))

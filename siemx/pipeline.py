@@ -4,7 +4,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from . import config, llm, rules, schema, triage, validate
+from . import config, llm, mappings, rules, schema, triage, validate
 
 
 def sha(text: str) -> str:
@@ -26,6 +26,7 @@ def render_parts(parts: list) -> list[str]:
 
 
 def convert_query(spl: str, target: str) -> dict:
+    spl = mappings.expand_macros(spl)        # client/shared Splunk macros
     stages = triage.split_stages(spl)
     # 1) rules first
     head = rules.first_stage(stages[0], target)
@@ -59,32 +60,52 @@ def status_for(res: dict) -> str:
     return "auto-approved"
 
 
-def is_current(meta_path, src_hash: str) -> bool:
-    """True if this output was made from the same SPL by the same converter version."""
+def mappings_hash() -> str:
+    """Fingerprint of everything outside the SPL file that changes the output:
+    sources (shared + client), macros (shared + client) and the field lists."""
+    fields = config.FIELDS_FILE.read_bytes() if config.FIELDS_FILE.exists() else b""
+    blob = json.dumps({"sources": rules._load_sources(), "macros": mappings.load_macros(),
+                       "fields": hashlib.sha256(fields).hexdigest()}, sort_keys=True)
+    return sha(blob)
+
+
+def is_current(meta_path, src_hash: str, map_hash: str) -> bool:
+    """True if this output was made from the same SPL, converter version and mappings."""
     if not meta_path.exists():
         return False
     m = json.loads(meta_path.read_text())
-    return m.get("src_hash") == src_hash and m.get("converter") == config.CONVERTER_VERSION
+    return (m.get("src_hash") == src_hash and m.get("converter") == config.CONVERTER_VERSION
+            and m.get("mappings_hash") == map_hash)
 
 
-def process_file(path, targets, force):
+def meta_path_for(path, target: str):
+    """converted/_meta/<same folders as detections/spl>/<name>.<target>.json, so files
+    with the same name in different folders do not overwrite each other."""
+    rel = path.relative_to(config.SRC_DIR)
+    return config.META_DIR / rel.parent / f"{rel.stem}.{target}.json"
+
+
+def process_file(path, targets, force, map_hash=None):
     spl = path.read_text()
     h = sha(spl)
+    map_hash = map_hash or mappings_hash()
     name = path.stem
     rel = path.relative_to(config.SRC_DIR).parent
+    shown = (rel / name).as_posix()
     results = []
     for t in targets:
-        meta_path = config.META_DIR / f"{name}.{t}.json"
-        if not force and is_current(meta_path, h):
-            results.append({"file": name, "target": t, "status": "skipped"})
+        meta_path = meta_path_for(path, t)
+        if not force and is_current(meta_path, h, map_hash):
+            results.append({"file": shown, "target": t, "status": "skipped"})
             continue
         res = convert_query(spl, t)
         st = status_for(res)
         out_file = config.OUT_DIR / t / rel / f"{name}{config.EXT[t]}"
         out_file.parent.mkdir(parents=True, exist_ok=True)
         out_file.write_text(res.get("query", "") + "\n")
-        config.META_DIR.mkdir(parents=True, exist_ok=True)
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
         meta = {"src": (config.SRC_REL / path.relative_to(config.SRC_DIR)).as_posix(),
+                "client": config.CLIENT, "mappings_hash": map_hash,
                 "src_hash": h, "converter": config.CONVERTER_VERSION, "target": t, "status": st,
                 "complexity": triage.complexity(spl),
                 "model": llm.MODEL if res.get("method", "").startswith("llm") else None,
@@ -92,16 +113,19 @@ def process_file(path, targets, force):
                 "ts": int(time.time()),
                 **{k: res.get(k) for k in ("confidence", "method", "warnings", "tokens")}}
         meta_path.write_text(json.dumps(meta, indent=2))
-        results.append({"file": name, "target": t, "status": st})
+        results.append({"file": shown, "target": t, "status": st})
     return results
 
 
-def run(targets, workers=4, force=False):
-    files = sorted(config.SRC_DIR.rglob("*.spl"))
+def run(targets, workers=4, force=False, path=None):
+    """Convert detections/spl/** (or only detections/spl/<path>/**)."""
+    root = config.SRC_DIR / path if path else config.SRC_DIR
+    files = sorted(root.rglob("*.spl"))
     print(f"found {len(files)} SPL files -> {','.join(targets)}", file=sys.stderr)
     counts = {}
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futs = {pool.submit(process_file, f, targets, force): f for f in files}
+        map_hash = mappings_hash()            # once per run, not per file
+        futs = {pool.submit(process_file, f, targets, force, map_hash): f for f in files}
         for i, fut in enumerate(as_completed(futs), 1):
             for r in fut.result():
                 counts[r["status"]] = counts.get(r["status"], 0) + 1
@@ -112,12 +136,12 @@ def run(targets, workers=4, force=False):
 
 def status():
     counts = {}
-    for m in config.META_DIR.glob("*.json"):
+    for m in config.META_DIR.rglob("*.json"):
         s = json.loads(m.read_text())["status"]
         counts[s] = counts.get(s, 0) + 1
     return counts
 
 
 def review_list():
-    metas = [json.loads(m.read_text()) for m in config.META_DIR.glob("*.json")]
+    metas = [json.loads(m.read_text()) for m in config.META_DIR.rglob("*.json")]
     return [m for m in metas if m["status"] in ("needs-review", "unsupported")]

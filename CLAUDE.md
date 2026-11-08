@@ -15,7 +15,8 @@ SPL -> split into pipe stages (triage.py)
       -> validate.py (+ retry)
    -> write converted/<lang>/... and converted/_meta/<name>.<lang>.json (pipeline.py)
 CLI in cli.py: `siemx convert | status | review` (review prints the warnings).
-Unchanged inputs are skipped by src_hash + CONVERTER_VERSION.
+Unchanged inputs are skipped by src_hash + CONVERTER_VERSION + mappings_hash (sources,
+macros, fields). Meta files mirror the detections/spl folder structure.
 CI: .github/workflows/convert.yml runs convert and opens a PR on bot/siemx-conversions;
 .github/workflows/tests.yml runs pytest on every PR (Python 3.10 and 3.12).
 
@@ -24,7 +25,13 @@ detections/spl/<source>/*.spl   originals (source of truth)
 converted/{kql,xql}/...         generated output (never edit by hand)
 converted/_meta/*.json          status, confidence, warnings, method, model, src_hash, converter
 converted/_cache/llm/*.json     LLM answers keyed by sha256(model + system + prompt)
-mappings/sources.json           base-search metadata (index=..., sourcetype=...) -> table/dataset
+mappings/sources.json           shared: base-search metadata (sourcetype=..., index=...) ->
+                                table/dataset. Most specific entry wins; an extra index in the
+                                SPL is dropped (flagged unless index=*)
+mappings/macros.json            shared Splunk macro definitions (`name` -> text), expanded first
+mappings/clients/<client>/      per-client sources.json / macros.json (override shared);
+                                select with `--client <client>` or $SIEMX_CLIENT; output goes
+                                to converted/<client>/ (index names differ per client)
 mappings/fields.json            known columns (+ types) per target table, copied from official
                                 schema docs with source URL; used by the field check
 siemx/rules.py                  stage rules; every rule's doc links are listed at the top
@@ -53,7 +60,7 @@ docs_index/                     (to build) chunked official docs + vector store
 
 ## Commands
 pip install -e ".[dev]"
-siemx convert --to kql,xql [--force] [--workers 4]
+siemx convert --to kql,xql [--force] [--workers 4] [--client acme] [--path acme]
 siemx status
 siemx review
 pytest -q
