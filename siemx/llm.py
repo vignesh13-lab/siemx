@@ -10,7 +10,8 @@ from pathlib import Path
 from . import config
 
 MODEL = os.environ.get("SIEMX_MODEL", "claude-sonnet-5-5")
-NAMES = {"kql": "KQL (Microsoft Sentinel / Defender)", "xql": "XQL (Palo Alto Cortex XDR/XSIAM)"}
+NAMES = {"kql": "KQL (Microsoft Sentinel / Defender)", "xql": "XQL (Palo Alto Cortex XDR/XSIAM)",
+         "spl": "SPL (Splunk)"}
 
 SYSTEM = (
     "You translate SIEM queries between languages. Use ONLY the reference "
@@ -22,20 +23,21 @@ SYSTEM = (
 EXAMPLES_K = 3
 
 
-def retrieve(spl: str, target: str) -> dict:
+def retrieve(spl: str, target: str, source: str = "spl") -> dict:
     """RAG context for the prompt:
     docs     official doc chunks (retrieve.py: name lookup, bridge, BM25 + vectors),
              empty when the index is not built (`siemx docs fetch` + `docs build`)
-    examples the most similar verified pairs from gold/pairs.jsonl (gold.py)"""
+    examples the most similar verified pairs from gold/pairs.jsonl (gold.py); for
+             KQL -> SPL the same pairs read backwards"""
     from . import docs, gold
     from . import retrieve as rag
-    examples = gold.examples_for_prompt(spl, target, k=EXAMPLES_K)
-    fields = field_hints(spl, target)
+    examples = gold.examples_for_prompt(spl, target, k=EXAMPLES_K, source=source)
+    fields = field_hints(spl, target) if source == "spl" else {}
     index = rag.get_index(docs.index_dir() / "chunks.jsonl")
     if index is None:
         return {"docs": [], "examples": examples, "field_map": fields}
-    return {"docs": rag.retrieve(index, spl, target).docs, "examples": examples,
-            "field_map": fields}
+    return {"docs": rag.retrieve(index, spl, target, source=source).docs,
+            "examples": examples, "field_map": fields}
 
 
 def field_hints(spl: str, target: str) -> dict:
@@ -51,7 +53,9 @@ def field_hints(spl: str, target: str) -> dict:
     return {"table": table, "fields": entries} if entries else {}
 
 
-def build_prompt(spl: str, target: str) -> str:
+def build_prompt(spl: str, target: str, source: str = "spl", base: str | None = None) -> str:
+    if source != "spl":
+        return build_reverse_prompt(spl, target, source, base)
     ctx = retrieve(spl, target)
     return (
         f"Translate this SPL to {NAMES[target]}.\n\nSPL:\n{spl}\n\n"
@@ -66,6 +70,29 @@ def build_prompt(spl: str, target: str) -> str:
         f"{json.dumps(ctx.get('field_map', {}), ensure_ascii=False)}\n\n"
         "Use only syntax shown in the reference docs or the verified examples. If something "
         "you need is not covered by them, add a warning instead of guessing.\n"
+        'Return JSON: {"query": str, "confidence": 0-1, "warnings": [str], '
+        '"unsupported": bool, "sources": [the URLs of the docs you relied on]}'
+    )
+
+
+def build_reverse_prompt(text: str, target: str, source: str, base: str | None) -> str:
+    """KQL -> SPL. The SPL base search comes from mappings/sources.json, so the model
+    never has to invent an index or sourcetype."""
+    ctx = retrieve(text, target, source=source)
+    return (
+        f"Translate this {NAMES[source]} query to {NAMES[target]}.\n\n"
+        f"{source.upper()}:\n{text}\n\n"
+        f"Start the SPL with exactly this base search for the table's data: {base}\n"
+        "Keep the column names as they are (they are mapped separately).\n\n"
+        f"Reference docs (official documentation excerpts; each has its source URL):\n"
+        f"{json.dumps(ctx['docs'], ensure_ascii=False)}\n\n"
+        "Verified examples (pairs already translated and checked; they show SYNTAX - "
+        "their table and field names are illustrative, do not copy them):\n"
+        f"{json.dumps(ctx['examples'], ensure_ascii=False)}\n\n"
+        "Use only syntax shown in the reference docs or the verified examples. Mind the "
+        "differences: KQL sort is descending by default; SPL sort keeps 10,000 rows unless "
+        "`sort 0`; SPL stats drops events whose by-field is missing. If something has no "
+        "faithful SPL equivalent, add a warning instead of guessing.\n"
         'Return JSON: {"query": str, "confidence": 0-1, "warnings": [str], '
         '"unsupported": bool, "sources": [the URLs of the docs you relied on]}'
     )
@@ -124,8 +151,8 @@ def call_model(prompt: str) -> dict:
     return out
 
 
-def translate(spl: str, target: str) -> dict:
-    prompt = build_prompt(spl, target)
+def translate(spl: str, target: str, source: str = "spl", base: str | None = None) -> dict:
+    prompt = build_prompt(spl, target, source=source, base=base)
     key = cache_key(prompt)
     cached = _cache_get(key)
     if cached is not None:

@@ -128,7 +128,7 @@ def test_unruled_stage_goes_to_llm_and_is_flagged(workspace, monkeypatch):
     """A stage with no rule must reach the LLM; a failed LLM result is unsupported."""
     calls = []
 
-    def stub(spl, target):
+    def stub(spl, target, **kw):
         calls.append(target)
         return {"query": "", "confidence": 0.0, "unsupported": True,
                 "warnings": ["LLM step failed: stub"], "tokens": 0}

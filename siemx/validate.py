@@ -220,12 +220,49 @@ def xql_problems(query: str) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+_SPL_COMMANDS: set[str] | None = None
+
+
+def spl_commands() -> set[str] | None:
+    """Command names from the official SPL Search Reference pages in rag/sources.json.
+    Functions are documented in grouped pages (text-functions, ...), so only commands
+    are checked."""
+    global _SPL_COMMANDS
+    if _SPL_COMMANDS is None:
+        f = config.ROOT / "rag" / "sources.json"
+        if not f.exists():
+            f = Path(__file__).resolve().parent.parent / "rag" / "sources.json"
+        if not f.exists():
+            return None
+        data = json.loads(f.read_text(encoding="utf-8"))
+        _SPL_COMMANDS = {s["slug"] for s in data["sources"]
+                         if s["lang"] == "spl" and s["kind"] == "command"}
+    return _SPL_COMMANDS or None
+
+
+def spl_problems(query: str) -> list[str]:
+    """Every command after a pipe must be an official SPL command. The first stage is
+    the base search (index=... terms), not a command, unless the query starts with '|'
+    (| tstats ..., | inputlookup ...)."""
+    cmds = spl_commands()
+    if cmds is None:
+        return []
+    code, _ = _outside_quotes(query)
+    out = []
+    for name in re.findall(r"\|\s*([A-Za-z_][A-Za-z0-9_]*)", code):
+        if name.lower() not in cmds:
+            out.append(f"SPL: unknown command '{name}' (not in the official Search Reference)")
+    return list(dict.fromkeys(out))
+
+
 # ---- entry points --------------------------------------------------------------------------------
 
 def status() -> dict:
     return {"kql": "official parser (Kusto.Language)" if KqlValidator.available()
             else "basic checks only (run: npm ci --prefix tools/kql-validate)",
             "xql": "name check against the official reference" if xql_reference()
+            else "basic checks only (rag/sources.json missing)",
+            "spl": "command-name check against the official reference" if spl_commands()
             else "basic checks only (rag/sources.json missing)"}
 
 
@@ -237,4 +274,6 @@ def check(query: str, target: str, scope: str = "all") -> list[str]:
         problems += kql_problems(query, scope)
     elif target == "xql":
         problems += xql_problems(query)
+    elif target == "spl":
+        problems += spl_problems(query)
     return list(dict.fromkeys(problems))[:MAX_PROBLEMS]

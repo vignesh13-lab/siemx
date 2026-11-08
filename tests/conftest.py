@@ -46,7 +46,7 @@ def sources_map(tmp_path, monkeypatch):
 def no_llm(monkeypatch):
     """Fail loudly if a test path reaches the LLM."""
 
-    def fake(spl, target):
+    def fake(spl, target, **kw):
         raise AssertionError("LLM must not be called for rule-covered queries")
 
     monkeypatch.setattr(llm, "translate", fake)

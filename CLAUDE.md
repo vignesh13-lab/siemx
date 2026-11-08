@@ -137,7 +137,19 @@ pytest -q
    default; sort 0 avoids SPL's 10,000-row cap; =~/contains use lower() + like() with
    lowercased values (SPL like/in case sensitivity is undocumented); `has` -> unsupported.
    Round-trip tests: KQL -> SPL -> KQL gives the original for exact cases.
-   NEXT: part 2 LLM fallback for KQL -> SPL; part 3 XQL -> SPL (no official parser).
+   PART 2 DONE: LLM fallback for KQL -> SPL, only for rule gaps (operator/expression).
+   Invalid KQL, no table first, or a table with no SPL source -> unsupported, no LLM
+   (the model cannot know the client's index). The prompt fixes the SPL base search from
+   sources.json; RAG reuses retrieve.py with source="kql" (KQL docs by name, Microsoft's
+   bridge inverted, SPL docs by BM25/vectors) and gold pairs read backwards (shared KQL
+   operators/functions). Output validated by an SPL command-name check against the
+   official Search Reference (validate.spl_problems; functions are not checked, the docs
+   group them). Every LLM result warns that column names are still the KQL table's ->
+   always needs-review. Forward prompt text unchanged (cache keys stay valid).
+   `siemx docs eval --reverse`: 24 gold pairs read backwards, hybrid hit 0.96 / recall
+   0.92 / MRR 0.50 (BM25 alone 0.29). Known misses: arg_max->dedup, extract->rex,
+   bin->timechart (KQL function vs SPL command).
+   NEXT: part 3 XQL -> SPL (no official parser).
 8. DONE siemx report (siemx/report.py): converted/<client>/_report/report.md + summary.csv
    (summary per source, warning categories, SPL commands without rules, review accuracy by
    status/method/target/command, LLM auto-approval threshold analysis), --mkdocs writes a

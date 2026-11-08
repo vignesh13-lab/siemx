@@ -56,6 +56,35 @@ def evaluate_examples(pairs: list[dict], cases: list[dict], k: int = 3) -> dict:
     return report
 
 
+def reverse_cases(pairs: list[dict]) -> list[dict]:
+    """KQL -> SPL cases from gold pairs read backwards: the query is the pair's KQL, the
+    expected names are the SPL commands of its verified SPL (base search excluded)."""
+    from .triage import split_stages
+    out = []
+    for p in pairs:
+        if not p.get("kql"):
+            continue
+        cmds = [st.split()[0].lower() for st in split_stages(p["spl"])[1:] if st.split()]
+        if cmds:
+            out.append({"kql": p["kql"], "spl": list(dict.fromkeys(cmds))})
+    return out
+
+
+def evaluate_reverse(index, cases: list[dict], retrieve_fn) -> dict:
+    """retrieve_fn(index, kql, 'spl', source='kql') -> Retrieved; scores SPL chunks only."""
+    rows = []
+    for case in cases:
+        res = retrieve_fn(index, case["kql"], "spl", source="kql")
+        names = [d["names"] for d in res.docs if d["lang"] == "spl"]
+        rows.append({"kql": case["kql"], **score_case(names, case["spl"])})
+    n = len(rows) or 1
+    return {"cases": len(rows),
+            "hit": round(sum(r["hit"] for r in rows) / n, 3),
+            "recall": round(sum(r["recall"] for r in rows) / n, 3),
+            "mrr": round(sum(r["mrr"] for r in rows) / n, 3),
+            "misses": [r for r in rows if r["missing"]]}
+
+
 def evaluate(index, cases: list[dict], retrieve_fn) -> dict:
     """retrieve_fn(index, spl, target) -> Retrieved (docs with 'lang' and 'names')."""
     report = {}

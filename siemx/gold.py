@@ -200,10 +200,38 @@ def similar(pairs: list[dict], spl: str, target: str, k: int = 3,
 
 
 def examples_for_prompt(spl: str, target: str, k: int = 3,
-                        exclude_spl: str | None = None) -> list[dict]:
+                        exclude_spl: str | None = None, source: str = "spl") -> list[dict]:
+    if source != "spl":
+        return [{source: p[source], "spl": p["spl"], "verified_by": p["verified_by"],
+                 "notes": p.get("notes", "")}
+                for _, p in similar_reverse(load(), spl, source, k, exclude_spl)]
     return [{"spl": p["spl"], target: p[target], "verified_by": p["verified_by"],
              "notes": p.get("notes", "")}
             for _, p in similar(load(), spl, target, k, exclude_spl)]
+
+
+def kql_features(kql: str) -> set[str]:
+    """Operators + functions after the table, e.g. {'summarize', 'count', 'top'}."""
+    from .retrieve import kql_names
+    from .reverse import split_pipes
+    return {n for st in split_pipes(kql)[1:] for n in kql_names(st)}
+
+
+def similar_reverse(pairs: list[dict], query: str, source: str, k: int = 3,
+                    exclude: str | None = None) -> list[tuple[float, dict]]:
+    """Gold pairs read backwards: rank by shared KQL operators/functions."""
+    feats = kql_features(query)
+    skip = normalize(exclude) if exclude else None
+    scored = []
+    for p in pairs:
+        if not p.get(source) or (skip and normalize(p[source]) == skip):
+            continue
+        pf = kql_features(p[source])
+        union = feats | pf
+        if feats & pf:
+            scored.append((len(feats & pf) / len(union), p))
+    scored.sort(key=lambda x: (-x[0], x[1]["id"]))
+    return scored[:k]
 
 
 def check(pairs: list[dict]) -> list[dict]:

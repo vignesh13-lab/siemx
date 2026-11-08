@@ -120,7 +120,7 @@ def test_rule_output_is_validated(sources_map, no_llm, monkeypatch):
 def test_retry_gets_previous_query_and_exact_errors(workspace, monkeypatch):
     calls = []
 
-    def translate(spl, target):
+    def translate(spl, target, **kw):
         calls.append(spl)
         q = "SecurityEvent | summarise count()" if len(calls) == 1 else "SecurityEvent | summarize count()"
         return {"query": q, "confidence": 0.8, "warnings": [], "unsupported": False}
@@ -138,4 +138,5 @@ def test_retry_gets_previous_query_and_exact_errors(workspace, monkeypatch):
 
 def test_status_reports_what_ran():
     s = validate.status()
-    assert set(s) == {"kql", "xql"} and s["xql"].startswith("name check")
+    assert set(s) == {"kql", "xql", "spl"} and s["xql"].startswith("name check")
+    assert s["spl"].startswith("command-name check")

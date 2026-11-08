@@ -351,13 +351,16 @@ def convert(kql: str) -> dict:
     problems = validate.check(kql, "kql") if validate.KqlValidator.available() else []
     syntax = [p for p in problems if "syntax" in p or p.startswith("unbalanced")]
     if syntax:
-        return _unsupported(f"input is not valid KQL: {syntax[0]}")
+        return _unsupported(f"input is not valid KQL: {syntax[0]}")       # no LLM: fix input
     stages = split_pipes(kql)
     table = stages[0].strip() if stages else ""
     if not _IDENT.fullmatch(table):
-        return _unsupported("the query must start with a table name")
+        return _unsupported("the query must start with a table name")    # no LLM
     try:
         base, warnings = base_search_for(table)
+    except Unsupported as e:
+        return _unsupported(str(e))      # no LLM: it cannot know your Splunk index either
+    try:
         ctx = {"first": True, "earliest": None, "warnings": warnings, "columns": [],
                "created": set(), "rename": reverse_field_names(table)}
         out = []
@@ -367,7 +370,8 @@ def convert(kql: str) -> dict:
             if spl:
                 out.append(spl)
     except (Unsupported, kql_expr.Unsupported) as e:
-        return _unsupported(str(e))
+        # a rule gap (operator / expression): the LLM may translate it with this base search
+        return _unsupported(str(e), llm_base=base)
     if ctx["earliest"]:
         base = f"{base} earliest={ctx['earliest']}"
     mapped = set(ctx["rename"].values())
@@ -379,6 +383,7 @@ def convert(kql: str) -> dict:
             "warnings": list(dict.fromkeys(ctx["warnings"])), "tokens": 0}
 
 
-def _unsupported(reason: str) -> dict:
+def _unsupported(reason: str, llm_base: str | None = None) -> dict:
+    """llm_base set = a rule gap the LLM fallback may handle, using this SPL base search."""
     return {"query": "", "confidence": 0.0, "method": "rules", "unsupported": True,
-            "warnings": [f"not converted: {reason}"], "tokens": 0}
+            "warnings": [f"not converted: {reason}"], "tokens": 0, "llm_base": llm_base}

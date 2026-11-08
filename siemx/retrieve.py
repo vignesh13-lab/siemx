@@ -157,25 +157,61 @@ def first_sentence(chunk_text: str, limit: int) -> str:
     return (m.group(1) if m else body)[:limit]
 
 
+def kql_names(stage: str) -> list[str]:
+    """KQL operator of a stage plus function names: 'extend n = strlen(x)' -> ['extend', 'strlen']."""
+    from .reverse import Unsupported, operator_of
+    try:
+        op = operator_of(stage)[0].replace(" by", "")       # 'sort by' -> 'sort'
+    except Unsupported:
+        return []
+    names = [op]
+    for f in _FUNC.findall(stage.lower()):
+        if f not in names:
+            names.append(f)
+    return names
+
+
+def invert_bridge(bridge: dict[str, list[str]]) -> dict[str, list[str]]:
+    """{'stats': ['summarize']} -> {'summarize': ['stats']} (for KQL -> SPL)."""
+    out: dict[str, list[str]] = {}
+    for spl_name, targets in bridge.items():
+        for t in targets:
+            out.setdefault(t, [])
+            if spl_name not in out[t]:
+                out[t].append(spl_name)
+    return out
+
+
 def retrieve(index: BM25Index, spl: str, target: str, budget: int = BUDGET_CHARS,
-             opts: Options | None = None) -> Retrieved:
+             opts: Options | None = None, source: str = "spl") -> Retrieved:
+    """Docs for translating `spl` (a query in `source`) into `target`. For KQL -> SPL the
+    same steps run with the roles swapped: KQL docs by name, the official bridge
+    inverted (summarize -> stats), then BM25/vectors over the SPL docs."""
     from .triage import split_stages
     opts = opts or Options()
     picked: dict[str, Chunk] = {}
     trace: list[str] = []
-    stages = split_stages(spl)
-    bridge = index.bridge.get(target, {}) if opts.use_bridge else {}
+    if source == "kql":
+        from .reverse import split_pipes
+        stages = split_pipes(spl)
+        bridge = invert_bridge(index.bridge.get("kql", {})) if opts.use_bridge else {}
+        names_of = kql_names
+    else:
+        stages = split_stages(spl)
+        bridge = index.bridge.get(target, {}) if opts.use_bridge else {}
+        names_of = spl_names
+    S = source.upper()
     for i, st in enumerate(stages):
         if i == 0 and opts.skip_base:
             continue
-        names = spl_names(st) if i else []           # first stage = base search, no command
-        # hop 1: SPL docs for the SPL commands/functions in this stage
+        names = names_of(st) if i else []           # first stage = base search / table
+        # hop 1: source-language docs for the commands/functions in this stage
         spl_context = []
         for n in names:
-            for c in index.by_name(n, "spl"):
+            for c in index.by_name(n, source):
                 picked.setdefault(c.id, c)
                 spl_context.append(c.text)
-                trace.append(f"stage {i}: SPL '{n}' -> {c.id} (name match)")
+                trace.append(f"stage {i}: {S} '{n}' -> {c.id} (name match)")
         # hop 1b: official bridge (e.g. Microsoft's Splunk-to-KQL cheat sheet)
         bridged = [t for n in names for t in bridge.get(n, [])]
         for t in bridged:
@@ -196,14 +232,14 @@ def retrieve(index: BM25Index, spl: str, target: str, budget: int = BUDGET_CHARS
             # one query per SPL command/function: the first sentence of ITS description,
             # compared with target docs written in the same descriptive style
             for n in names:
-                spl_doc = index.by_name(n, "spl", k=1)
+                spl_doc = index.by_name(n, source, k=1)
                 if not spl_doc:
                     continue
                 vq = first_sentence(spl_doc[0].text, 300)
                 hits = index.vec.search(vq, lang=target, k=opts.pool)
                 rankings.append([cid for _, cid in hits])
                 for sim, cid in hits:
-                    how.setdefault(cid, f"vector {sim:.2f} via SPL '{n}'")
+                    how.setdefault(cid, f"vector {sim:.2f} via {S} '{n}'")
                 if hits:
                     best_per_name.append((n, hits[0]))
         from .vectors import rrf
@@ -227,7 +263,7 @@ def retrieve(index: BM25Index, spl: str, target: str, budget: int = BUDGET_CHARS
                 c = index.by_id.get(cid)
                 if c is not None and cid not in picked:
                     picked[cid] = c
-                    trace.append(f"stage {i}: {target.upper()} best vector for SPL '{n}' "
+                    trace.append(f"stage {i}: {target.upper()} best vector for {S} '{n}' "
                                  f"{sim:.2f} -> {cid}")
     docs, used = [], 0
     for c in picked.values():

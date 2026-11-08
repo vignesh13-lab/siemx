@@ -78,19 +78,25 @@ def convert_query(spl: str, target: str) -> dict:
         return {"query": q, "confidence": 0.9, "method": "rules", "warnings": warnings,
                 "tokens": 0, "validator": validate.status()[target], "field_map": applied}
     # 2) LLM + RAG fallback; the validator's exact errors go back to the model
-    no_rule = missing_rules(spl, target)
-    out = llm.translate(spl, target)
+    out = llm_with_retry(spl, target)
+    out["no_rule"] = missing_rules(spl, target)
+    return out
+
+
+def llm_with_retry(text: str, target: str, source: str = "spl", base: str | None = None) -> dict:
+    """LLM translation, validated; the exact problems go back to the model (MAX_RETRIES)."""
+    out = llm.translate(text, target, source=source, base=base)
     out["method"] = "llm"
     for _ in range(MAX_RETRIES):
         problems = validate.check(out.get("query", ""), target)
         if not problems or out.get("unsupported"):
             break
-        out = llm.translate(retry_request(spl, target, out.get("query", ""), problems), target)
+        out = llm.translate(retry_request(text, target, out.get("query", ""), problems), target,
+                            source=source, base=base)
         out["method"] = "llm-retry"
     out.setdefault("warnings", []).extend(
         f"validation: {p}" for p in validate.check(out.get("query", ""), target))
     out["validator"] = validate.status()[target]
-    out["no_rule"] = no_rule
     return out
 
 
@@ -153,7 +159,18 @@ def convert_any(text: str, target: str, source: str = "spl") -> dict:
         return convert_query(text, target)
     if source == "kql" and target == "spl":
         from . import reverse
-        return reverse.convert(text)
+        res = reverse.convert(text)
+        if res.get("unsupported") and res.get("llm_base"):
+            rule_gap = res["warnings"]
+            res = llm_with_retry(text, "spl", source="kql", base=res["llm_base"])
+            res["no_rule"] = [w.removeprefix("not converted: ") for w in rule_gap]
+            if not res.get("unsupported"):
+                # the model keeps KQL column names (as told); a person must map them
+                table = reverse.split_pipes(text)[0].strip()
+                res.setdefault("warnings", []).append(
+                    f"SPL: LLM translation keeps the KQL table's column names ({table}); "
+                    "map them to your Splunk field names")
+        return res
     raise ValueError(f"no conversion from {source} to {target}")
 
 

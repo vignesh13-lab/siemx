@@ -149,7 +149,7 @@ def test_macro_query_end_to_end(maps, no_llm):
 
 def test_unknown_macro_goes_to_llm(maps, monkeypatch):
     calls = []
-    monkeypatch.setattr(pipeline.llm, "translate", lambda s, t: calls.append(s) or
+    monkeypatch.setattr(pipeline.llm, "translate", lambda s, t, **kw: calls.append(s) or
                         {"query": "", "confidence": 0, "unsupported": True, "warnings": []})
     pipeline.convert_query("`nope` EventID=4625", "kql")
     assert calls == ["`nope` EventID=4625"]
