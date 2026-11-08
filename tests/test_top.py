@@ -6,20 +6,20 @@ from siemx import pipeline, rules
 
 @pytest.mark.parametrize("spl, kql, xql", [
     ("top 5 user showperc=f",
-     "summarize ['count'] = count() by user\n| top 5 by ['count'] desc",
-     "comp count() as count by user\n| sort desc count\n| limit 5"),
+     "where isnotempty(user)\n| summarize ['count'] = count() by user\n| top 5 by ['count'] desc",
+     "filter user != null\n| comp count() as count by user\n| sort desc count\n| limit 5"),
     ("top user showperc=false",                          # default limit 10
-     "summarize ['count'] = count() by user\n| top 10 by ['count'] desc",
-     "comp count() as count by user\n| sort desc count\n| limit 10"),
+     "where isnotempty(user)\n| summarize ['count'] = count() by user\n| top 10 by ['count'] desc",
+     "filter user != null\n| comp count() as count by user\n| sort desc count\n| limit 10"),
     ("top limit=3 user showperc=0",
-     "summarize ['count'] = count() by user\n| top 3 by ['count'] desc",
-     "comp count() as count by user\n| sort desc count\n| limit 3"),
+     "where isnotempty(user)\n| summarize ['count'] = count() by user\n| top 3 by ['count'] desc",
+     "filter user != null\n| comp count() as count by user\n| sort desc count\n| limit 3"),
     ("top limit=0 user showperc=f",                      # limit=0: all values
-     "summarize ['count'] = count() by user\n| sort by ['count'] desc",
-     "comp count() as count by user\n| sort desc count"),
+     "where isnotempty(user)\n| summarize ['count'] = count() by user\n| sort by ['count'] desc",
+     "filter user != null\n| comp count() as count by user\n| sort desc count"),
     ("top 3 user countfield=total showperc=f",
-     "summarize total = count() by user\n| top 3 by total desc",
-     "comp count() as total by user\n| sort desc total\n| limit 3"),
+     "where isnotempty(user)\n| summarize total = count() by user\n| top 3 by total desc",
+     "filter user != null\n| comp count() as total by user\n| sort desc total\n| limit 3"),
     ("top showperc=f 2 user",                            # N must come first
      None, None),
 ])
@@ -41,7 +41,7 @@ def test_top_with_percent_flagged(spl):
 
 def test_top_kql_dotted_field_xql_rejected():
     assert rules.stage("top src.ip showperc=f", "kql") == (
-        "summarize ['count'] = count() by ['src.ip']\n| top 10 by ['count'] desc")
+        "where isnotempty(['src.ip'])\n| summarize ['count'] = count() by ['src.ip']\n| top 10 by ['count'] desc")
     assert rules.stage("top src.ip showperc=f", "xql") is None
 
 
@@ -71,7 +71,7 @@ def test_top_effects():
 def test_top_end_to_end(sources_map, no_llm):
     spl = "index=wineventlog | top 5 Computer showperc=f | head 3"
     kql = pipeline.convert_query(spl, "kql")
-    assert kql["query"] == ("SecurityEvent\n| summarize ['count'] = count() by Computer\n"
+    assert kql["query"] == ("SecurityEvent\n| where isnotempty(Computer)\n| summarize ['count'] = count() by Computer\n"
                             "| top 5 by ['count'] desc\n| take 3")
     assert pipeline.status_for(kql) == "auto-approved"   # top output is sorted
 

@@ -156,7 +156,7 @@ def test_eval_end_to_end(sources_map, no_llm):
            "| stats count by Computer | sort - count | head 5")
     kql = pipeline.convert_query(spl, "kql")
     assert kql["query"] == ("SecurityEvent\n| extend kb = todouble(EventID) / 1024\n"
-                            "| where kb > 1\n| summarize ['count'] = count() by Computer\n"
+                            "| where kb > 1\n| where isnotempty(Computer)\n| summarize ['count'] = count() by Computer\n"
                             "| sort by ['count'] desc\n| take 5")
     assert pipeline.status_for(kql) == "auto-approved"   # kb is known after eval
 

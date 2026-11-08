@@ -7,8 +7,8 @@ from siemx import config, pipeline
 SPL = "index=wineventlog | stats count by host | sort - count | head 10"
 
 EXPECTED = {
-    "kql": "SecurityEvent\n| summarize ['count'] = count() by host\n| sort by ['count'] desc\n| take 10",
-    "xql": "dataset = xdr_data\n| comp count() as count by host\n| sort desc count\n| limit 10",
+    "kql": "SecurityEvent\n| where isnotempty(host)\n| summarize ['count'] = count() by host\n| sort by ['count'] desc\n| take 10",
+    "xql": "dataset = xdr_data\n| filter host != null\n| comp count() as count by host\n| sort desc count\n| limit 10",
 }
 
 
@@ -145,12 +145,12 @@ def test_flagged_rule_output_is_needs_review(sources_map, no_llm):
     spl = 'index=wineventlog | where user="admin" | stats count by host'
     kql = pipeline.convert_query(spl, "kql")
     assert kql["query"] == ("SecurityEvent\n| where user == \"admin\"\n"
-                            "| summarize ['count'] = count() by host")
+                            "| where isnotempty(host)\n| summarize ['count'] = count() by host")
     assert pipeline.status_for(kql) == "auto-approved"
 
     xql = pipeline.convert_query(spl, "xql")
     assert xql["query"] == ("dataset = xdr_data\n| filter user = \"admin\"\n"
-                            "| comp count() as count by host")
+                            "| filter host != null\n| comp count() as count by host")
     assert xql["method"] == "rules" and xql["warnings"]
     assert pipeline.status_for(xql) == "needs-review"
 
