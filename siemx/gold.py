@@ -28,7 +28,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config
+from . import config, validate
 
 SEED_SOURCES = {"index=wineventlog": {"kql": "SecurityEvent", "xql": "dataset = xdr_data"}}
 SEED_QUERIES = [
@@ -122,10 +122,12 @@ def seed(queries: list[str] = SEED_QUERIES) -> list[dict]:
             skipped = []
             for t in ("kql", "xql"):
                 query, caveats = rule_translation(spl, t)
-                if query is not None and not caveats:
+                invalid = validate.check(query, t, scope="rules") if query else []
+                if query is not None and not caveats and not invalid:
                     row[t] = query
                 else:
-                    skipped.append(f"{t}: {'no rule' if query is None else 'rule caveat'}")
+                    why = "no rule" if query is None else "rule caveat" if caveats else "invalid"
+                    skipped.append(f"{t}: {why}")
             if skipped:
                 row["notes"] = "not verified -> " + "; ".join(skipped)
             if row["kql"] or row["xql"]:
@@ -205,7 +207,8 @@ def examples_for_prompt(spl: str, target: str, k: int = 3,
 
 
 def check(pairs: list[dict]) -> list[dict]:
-    """Regression: for rule-generated pairs, do the rules still give the same answer?"""
+    """Regression: for rule-generated pairs, do the rules still give the same answer,
+    and does it still pass validation (official KQL parser / XQL names)?"""
     problems = []
     with _seed_mapping():
         for p in pairs:
@@ -215,7 +218,8 @@ def check(pairs: list[dict]) -> list[dict]:
                 if not p.get(t):
                     continue
                 now, caveats = rule_translation(p["spl"], t)
-                if now != p[t] or caveats:
+                invalid = validate.check(p[t], t, scope="rules")
+                if now != p[t] or caveats or invalid:
                     problems.append({"id": p["id"], "target": t, "gold": p[t], "now": now,
-                                     "caveats": caveats})
+                                     "caveats": caveats + invalid})
     return problems

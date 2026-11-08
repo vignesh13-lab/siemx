@@ -6,3 +6,4 @@ __pycache__/
 # RAG: downloaded documentation text and built indexes (rebuild with `siemx docs ...`)
 rag/raw/
 rag/index/
+tools/kql-validate/node_modules/

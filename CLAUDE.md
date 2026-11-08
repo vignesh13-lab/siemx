@@ -108,7 +108,16 @@ pytest -q
    (dc, concat/strcat, lookup, join, strftime) need human-reviewed pairs, not guesses.
    Evaluation excludes the exact query from its own examples (leakage guard).
    Never put SPL/KQL/XQL keywords (where, if, not, has...) in the BM25 stopword list.
-5. validate.py: real validation (KQL parser or dry-run; XQL dry-run if API available); feed errors into the retry loop.
+5. DONE validate.py: KQL with Microsoft's official parser (Kusto.Language, npm
+   @kusto/language-service-next 12.4.1) in one long-running Node process
+   (tools/kql-validate; install: npm ci --prefix tools/kql-validate). Syntax always;
+   semantic analysis with the table schema from fields.json (unknown functions/columns,
+   type errors only when column types are known). XQL: no public parser; stage and
+   function names are checked against the official reference (rag/sources.json).
+   Rule output and gold are validated with scope="rules" (syntax + unknown functions);
+   LLM output with scope="all". The retry prompt gets the previous query and the exact
+   errors with line/column. All 56 rule outputs of the 40-query test set and all 44 gold
+   targets pass. A Cortex dry-run (real XQL check) would need a tenant + API key.
 6. Field mapping: mappings/field_map.json (CIM <-> ASIM <-> XDM) applied to field names in
    outputs (mappings/fields.json already lists the known target columns for the check).
 7. Reverse direction: KQL/XQL -> SPL (parsers for KQL and XQL into the same stage/IR form).
