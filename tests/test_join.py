@@ -93,7 +93,17 @@ def test_join_two_keys(two_sources):
 
 def test_join_subsearch_warnings_propagate(two_sources):
     r = rules.stage('join max=0 host [search index=proxy | where u="x"]', "xql")
-    assert any(w.startswith("subsearch: XQL: case sensitivity") for w in r.warnings)
+    assert "subsearch: XQL: needs config case_sensitive = true" in r.warnings
+
+
+def test_case_sensitive_string_inside_join_subquery_stays_for_review(two_sources, no_llm):
+    from siemx import pipeline
+    spl = 'index=wineventlog | join max=0 host [search index=proxy | where u="x"]'
+    r = pipeline.convert_query(spl, "xql")
+    assert not r["query"].startswith("config")            # nothing to switch at the top level
+    assert pipeline.W_XQL_SUB_CASE in r["warnings"]
+    assert not any("needs config" in w for w in r["warnings"])
+    assert pipeline.status_for(r) == "needs-review"
 
 
 def test_join_effects(two_sources):

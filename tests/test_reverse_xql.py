@@ -216,3 +216,21 @@ def test_convert_from_xql(workspace, sources_map, monkeypatch, capsys):
                           "| stats count AS n by host")
     meta = json.loads((config.META_DIR / "windows" / "failed.spl.json").read_text())
     assert meta["src"] == "detections/xql/windows/failed.xql" and meta["source"] == "xql"
+
+
+def test_round_trip_case_sensitive(sources_map, no_llm):
+    """SPL where == (case-sensitive) -> XQL with config case_sensitive = true -> back to ==."""
+    spl_in = 'index=wineventlog | where user="Admin" | stats count by host'
+    xql = pipeline.convert_query(spl_in, "xql")["query"]
+    assert xql.startswith("config case_sensitive = true\n| dataset = xdr_data")
+    assert 'filter user = "Admin"' in xql
+    back = spl(xql)["query"]
+    assert 'where user=="Admin"' in back and "lower(" not in back
+
+
+def test_forward_prompt_pitfalls_only_for_xql(monkeypatch):
+    monkeypatch.setattr(llm, "retrieve", lambda t, tg, source="spl": {"docs": [], "examples": [],
+                                                                       "field_map": {}})
+    assert "config case_sensitive = true" in llm.build_prompt("index=a | where u=\"x\"", "xql")
+    kql = llm.build_prompt("index=a | where u=\"x\"", "kql")
+    assert "case_sensitive" not in kql and "guessing.\nReturn JSON" in kql     # text unchanged

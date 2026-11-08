@@ -21,7 +21,7 @@ EXT = {"kql": ".kql", "xql": ".xql", "spl": ".spl"}
 CONF_AUTO_APPROVE = 0.85   # at or above this -> auto-approved
 
 # Bump whenever rules/prompts change output, so unchanged SPL is re-converted.
-CONVERTER_VERSION = "19"   # 19: XQL -> SPL (rules + LLM fallback)
+CONVERTER_VERSION = "20"   # 20: XQL config case_sensitive for where/eval string comparisons
 
 
 def set_client(name: str | None) -> None:
