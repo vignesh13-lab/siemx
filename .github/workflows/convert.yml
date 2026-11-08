@@ -27,8 +27,8 @@ jobs:
       SIEMX_CLIENT: ${{ inputs.client }}
       SIEMX_PATH: ${{ inputs.path }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install -e .
       - name: Convert (unchanged files are skipped by hash)
@@ -40,7 +40,7 @@ jobs:
           echo "### siemx status ${SIEMX_CLIENT:-(shared mappings)}" >> "$GITHUB_STEP_SUMMARY"
           siemx status >> "$GITHUB_STEP_SUMMARY"
       - name: Open PR with converted queries
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: bot/siemx-conversions${{ inputs.client && format('-{0}', inputs.client) || '' }}
           title: "siemx: converted detections${{ inputs.client && format(' ({0})', inputs.client) || '' }}"
