@@ -88,5 +88,5 @@ def test_rex_end_to_end(sources_map, no_llm, monkeypatch):
     assert kql["query"] == ("SecurityEvent\n"
                             "| extend site = extract(@\"^([a-z]+)-\", 1, Computer)\n"
                             "| summarize ['count'] = count() by site\n"
-                            "| sort by ['count'] desc")
+                            "| sort by ['count'] desc\n| take 10000")
     assert pipeline.status_for(kql) == "auto-approved"   # site is known after rex

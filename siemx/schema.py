@@ -37,24 +37,32 @@ def check(parts: list, target: str) -> list[str]:
     table = table_of(parts[0], target)
     known = known_fields(table, target)
     schema = set(known or [])
+    seen = set(schema)                 # every field that existed at some point
     unknown: list[str] = []
+    removed: list[str] = []
     for part in parts[1:]:
         for f in getattr(part, "reads", []):
-            if f not in schema and f not in unknown:
-                unknown.append(f)
+            if f in schema or f in unknown or f in removed:
+                continue
+            (removed if f in seen else unknown).append(f)
         only = getattr(part, "only", None)
         if only is not None:
             schema = set(only)
         schema -= set(getattr(part, "drop", []))
         schema |= set(getattr(part, "add", []))
-    if not unknown:
-        return []
-    names = ", ".join(unknown)
-    if not known:
-        return [f"{target.upper()}: no field list for {table} in mappings/fields.json; "
-                f"field names not verified: {names}"]
-    return [f"{target.upper()}: field(s) not in {table} (mappings/fields.json): {names}. "
-            "Field names are copied from SPL unmapped; verify"]
+        seen |= schema
+    T = target.upper()
+    warnings = []
+    if removed:
+        warnings.append(f"{T}: field(s) used after an earlier stage removed them "
+                        f"(e.g. stats, table, rename): {', '.join(removed)}; verify")
+    if unknown and not known:
+        warnings.append(f"{T}: no field list for {table} in mappings/fields.json; "
+                        f"field names not verified: {', '.join(unknown)}")
+    elif unknown:
+        warnings.append(f"{T}: field(s) not in {table} (mappings/fields.json): "
+                        f"{', '.join(unknown)}. Field names are copied from SPL unmapped; verify")
+    return warnings
 
 
 ORDER_HEAD_WARNING = ("{T}: head -> {op} on rows with no defined order; SPL takes the first rows "

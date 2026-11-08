@@ -136,7 +136,7 @@ def test_unique_after():
 
 
 def test_join_with_untranslatable_subsearch_goes_to_llm(two_sources, monkeypatch):
-    """`stats count as n` has no rule -> the whole query falls back to the LLM."""
+    """`stats values()` has no rule -> the whole query falls back to the LLM."""
     calls = []
 
     def stub(spl, target):
@@ -145,7 +145,7 @@ def test_join_with_untranslatable_subsearch_goes_to_llm(two_sources, monkeypatch
 
     monkeypatch.setattr(pipeline.llm, "translate", stub)
     spl = ("index=wineventlog | stats count by host | join type=left host "
-           "[search index=proxy | stats count as n by host]")
+           "[search index=proxy | stats values(user) as u by host]")
     res = pipeline.convert_query(spl, "kql")
     assert calls == ["kql"] and res["method"] == "llm"
 
@@ -156,7 +156,7 @@ def test_join_end_to_end_rules(two_sources, no_llm):
     res = pipeline.convert_query(spl, "kql")
     assert res["method"] == "rules"
     assert res["query"] == ("SecurityEvent\n| summarize ['count'] = count() by host\n"
-                            "| sort by ['count'] desc\n"
+                            "| sort by ['count'] desc\n| take 10000\n"
                             "| join kind=leftouter (\n"
                             "    CommonSecurityLog\n"
                             "    | summarize ['count'] = count() by host\n"

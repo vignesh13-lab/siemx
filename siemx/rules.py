@@ -135,8 +135,12 @@ def stage(stage_text: str, target: str):
     cmd = command_of(stage_text)
     arg = stage_text.strip()[len(cmd):].strip()
 
+    if cmd == "fields" and arg.startswith("+"):
+        arg = arg[1:].strip()              # `fields + a` == `fields a`
     if cmd in ("table", "fields") and "-" not in arg:
         fl = _fields(arg)
+        if not fl or not all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", f) for f in fl):
+            return None                    # wildcards, quoted names
         f = _names(fl, target)
         return Out(f"project {f}" if target == "kql" else f"fields {f}", reads=fl, only=fl)
 
@@ -174,29 +178,159 @@ def stage(stage_text: str, target: str):
         return _rename(arg, target)
 
     if cmd == "head" and arg.isdigit():
-        return Out(f"take {arg}" if target == "kql" else f"limit {arg}", order="takes_first")
+        out = Out(f"take {arg}" if target == "kql" else f"limit {arg}", order="takes_first")
+        out.take_n = int(arg)
+        return out
 
-    # SPL `stats count` outputs a column named `count`. Name it explicitly so
-    # later stages (e.g. `sort - count`) can reference it:
-    #   KQL: unnamed count() becomes `count_`, and `count` is a keyword -> ['count'].
-    #   XQL: `comp count() as <alias> by f1, f2` (alias optional, documented).
-    m = re.fullmatch(r"count(?: by (.+))?", arg) if cmd == "stats" else None
-    if m:
-        by_fields = _fields(m.group(1)) if m.group(1) else []
-        by = f" by {_names(by_fields, target)}" if by_fields else ""
-        fx = dict(reads=by_fields, only=["count", *by_fields], order="loses", unique=by_fields)
-        if target == "kql":
-            return Out(f"summarize {kql_name('count')} = count(){by}", **fx)
-        return Out(f"comp count() as count{by}", **fx)
+    if cmd == "stats":
+        return _stats(arg, target)
 
-    m = re.fullmatch(r"([-+])?\s*(\w+)", arg) if cmd == "sort" else None
-    if m:
-        desc, f = m.group(1) == "-", m.group(2)
-        if target == "kql":
-            return Out(f"sort by {kql_name(f)} {'desc' if desc else 'asc'}", reads=[f], order="sorts")
-        return Out(f"sort {'desc' if desc else 'asc'} {f}", reads=[f], order="sorts")
+    if cmd == "sort":
+        return _sort(arg, target)
+
+    if cmd == "fields" and arg.startswith("-"):
+        return _fields_minus(arg[1:], target)
 
     return None
+
+
+# ---- stats ----------------------------------------------------------------------
+# SPL `stats <agg> [as name], ... [by f1, f2]`. Default output names are the call
+# text (dc(user), sum(bytes)); bare `count` -> `count`. dc is exact (estdc is the
+# estimate). count(X) counts events that have the field.
+#   KQL: summarize name = <agg>, ... by ...  Unnamed count() becomes count_, so
+#        every column is named. KQL counts empty strings as values, so field
+#        aggregations filter with isnotempty(): countif / count_distinctif /
+#        minif / maxif / sumif / avgif. dcount() is an estimate, so dc uses the
+#        exact count_distinctif(), which is in preview -> flagged.
+#   XQL: comp <agg>(f) as name, ... by ...; count(f) / count_distinct(f) skip
+#        nulls; sum ignores NULL. Names with special characters -> None.
+# Docs: SPL aggregate-functions; KQL summarize, countif, count-distinctif,
+# minif; XQL count_with_comp_stage, count_distinct, sum_with_comp_stage.
+
+KQL_DC_WARNING = ("KQL: dc() -> count_distinctif() (exact) is a preview function; dcount() "
+                  "would only be an estimate. Verify it is available in your workspace")
+_STATS_FUNCS = {   # spl name -> (kql aggregate, xql aggregate)
+    "count": ("countif", "count"), "c": ("countif", "count"),
+    "dc": ("count_distinctif", "count_distinct"),
+    "distinct_count": ("count_distinctif", "count_distinct"),
+    "sum": ("sumif", "sum"), "avg": ("avgif", "avg"),
+    "min": ("minif", "min"), "max": ("maxif", "max"),
+}
+_STATS_AGG = re.compile(
+    r"\s*(?:(?P<bare>count|c)\b(?!\()|(?P<fn>[a-z_]+)\((?P<field>[A-Za-z_][A-Za-z0-9_.]*)\))"
+    r"(?:\s+[Aa][Ss]\s+(?P<alias>[A-Za-z_][A-Za-z0-9_]*))?\s*,?")
+
+
+def _stats(arg: str, target: str):
+    m = re.fullmatch(r"(.*?)(?:\s+[Bb][Yy]\s+(.+))?", arg.strip(), re.S)
+    aggs_txt, by_txt = m.group(1), m.group(2)
+    by_fields = _fields(by_txt) if by_txt else []
+    if not all(_PLAIN_IDENT.fullmatch(f) for f in by_fields) or len(set(by_fields)) != len(by_fields):
+        return None
+    aggs, pos = [], 0                      # (name, kind, field)
+    while pos < len(aggs_txt):
+        a = _STATS_AGG.match(aggs_txt, pos)
+        if not a or a.end() == pos:
+            return None
+        pos = a.end()
+        if a.group("bare"):
+            aggs.append((a.group("alias") or "count", "count", None))
+            continue
+        fn, f = a.group("fn"), a.group("field")
+        if fn not in _STATS_FUNCS:
+            return None                    # values, list, estdc, perc, ...
+        if fn in ("count", "c") and not a.group("alias"):
+            return None                    # default name of count(X) not documented
+        aggs.append((a.group("alias") or f"{fn}({f})", fn, f))
+    names = [n for n, _, _ in aggs]
+    if not aggs or len(set(names + by_fields)) != len(names) + len(by_fields):
+        return None
+    agg_fields = [f for _, _, f in aggs if f]
+    fx = dict(reads=list(dict.fromkeys(by_fields + agg_fields)), only=[*names, *by_fields],
+              order="loses", unique=by_fields)
+    warnings = []
+    parts = []
+    for name, fn, f in aggs:
+        kql_fn, xql_fn = _STATS_FUNCS[fn]
+        if target == "kql":
+            if f is None:
+                expr_ = "count()"
+            else:
+                expr_ = f"{kql_fn}({kql_name(f)}, isnotempty({kql_name(f)}))"
+                if fn in ("count", "c"):
+                    expr_ = f"countif(isnotempty({kql_name(f)}))"
+                if kql_fn == "count_distinctif" and KQL_DC_WARNING not in warnings:
+                    warnings.append(KQL_DC_WARNING)
+            parts.append(f"{kql_name(name)} = {expr_}")
+        else:
+            if not _XQL_IDENT.fullmatch(name) or (f and not _XQL_IDENT.fullmatch(f)):
+                return None
+            parts.append(f"{xql_fn}({f or ''}) as {name}")
+    by = f" by {_names(by_fields, target)}" if by_fields else ""
+    op = "summarize" if target == "kql" else "comp"
+    text = f"{op} {', '.join(parts)}{by}"
+    return Flagged(text, warnings, **fx) if warnings else Out(text, **fx)
+
+
+# ---- sort -------------------------------------------------------------------------
+# SPL `sort [N] [-|+]f1, [-|+]f2 ...`: each field has its own sign (none = asc);
+# default limit 10,000 results, N=0 = all (search-commands/sort). The limit is
+# emitted explicitly; pipeline.py drops it when a smaller head follows.
+
+SORT_DEFAULT_LIMIT = 10000
+
+
+def _sort(arg: str, target: str):
+    toks = [t for t in re.split(r"[\s,]+", arg.strip()) if t]
+    limit = SORT_DEFAULT_LIMIT
+    if toks and toks[0].isdigit():
+        limit = int(toks.pop(0))
+    if any(t.lower() == "desc" for t in toks):
+        return None                        # trailing `desc` reverses the whole sort
+    keys, sign = [], None
+    for tok in toks:
+        if tok in ("-", "+"):
+            if sign is not None:
+                return None
+            sign = tok
+            continue
+        m = re.fullmatch(r"([-+]?)([A-Za-z_][A-Za-z0-9_]*)", tok)
+        if not m or (sign and m.group(1)):
+            return None                    # desc keyword, num()/str()/ip(), wildcards
+        keys.append((m.group(2), (sign or m.group(1)) == "-"))
+        sign = None
+    if not keys or sign is not None or len({k for k, _ in keys}) != len(keys):
+        return None
+    if target == "kql":
+        text = "sort by " + ", ".join(f"{kql_name(k)} {'desc' if d else 'asc'}" for k, d in keys)
+        cap = f"take {limit}"
+    else:
+        text = "sort " + ", ".join(f"{'desc' if d else 'asc'} {k}" for k, d in keys)
+        cap = f"limit {limit}"
+    full = f"{text}\n| {cap}" if limit else text
+    out = Out(full, reads=[k for k, _ in keys], order="sorts")
+    out.without_limit, out.limit = (text, limit) if limit else (None, None)
+    return out
+
+
+# ---- fields - -------------------------------------------------------------------------
+# SPL `fields - a, b` removes fields.
+#   KQL: project-away a, b.
+#   XQL: fields - a, b (docs only show it after a fields selection -> flagged).
+
+XQL_FIELDS_MINUS_WARNING = ("XQL: `fields -` is only shown after a `fields` selection in the "
+                            "docs; verify it keeps all other fields")
+
+
+def _fields_minus(arg: str, target: str):
+    fl = _fields(arg)
+    if not fl or not all(_PLAIN_IDENT.fullmatch(f) for f in fl) or len(set(fl)) != len(fl):
+        return None                        # wildcards, quoted names
+    fx = dict(reads=fl, drop=fl)
+    if target == "kql":
+        return Out("project-away " + _names(fl, target), **fx)
+    return Flagged("fields - " + ", ".join(fl), [XQL_FIELDS_MINUS_WARNING], **fx)
 
 
 # ---- rename -------------------------------------------------------------------
