@@ -117,15 +117,45 @@ def _names(fields: list[str], target: str) -> str:
 
 
 def _load_sources() -> dict:
-    return json.loads(MAP_FILE.read_text()) if MAP_FILE.exists() else {}
+    """Shared mappings/sources.json + the selected client's overrides."""
+    from . import mappings
+    return mappings.load_sources(MAP_FILE)
+
+
+INDEX_DROPPED_WARNING = (
+    "{T}: index={index} was dropped because the table comes from the {by} mapping. If this "
+    "index holds only part of that data (e.g. only domain controllers), map it in "
+    "mappings/clients/<client>/sources.json; verify")
+
+
+def match_source(meta: dict, target: str):
+    """Most specific sources.json entry whose metadata terms are all in the base
+    search. Extra base-search metadata may only be `index` (a storage location;
+    dropping it is flagged unless it is index=*). -> (table_text, dropped_index) or None."""
+    from . import search
+    best = None
+    for key, tgt in _load_sources().items():
+        km = search.parse_meta(key)
+        if km is None or not isinstance(tgt, dict) or target not in tgt:
+            continue
+        if any(meta.get(k) != v for k, v in km.items()):
+            continue
+        extra = {k: v for k, v in meta.items() if k not in km}
+        if set(extra) - {"index"}:
+            continue                       # an unmapped sourcetype/source cannot be dropped
+        if best is None or len(km) > best[0]:
+            best = (len(km), tgt[target], extra.get("index"), sorted(km))
+    if best is None:
+        return None
+    _, table_text, dropped, by = best
+    return table_text, (None if dropped in (None, "*") else dropped), "/".join(by)
 
 
 def first_stage(stage: str, target: str):
-    """Base search -> table/dataset (mappings/sources.json) + filter (search.py).
+    """Base search -> table/dataset (mappings) + filter (search.py).
 
-    The index/sourcetype/source terms must match a sources.json key exactly
-    (an unmatched sourcetype could not be dropped safely); other terms become
-    a where / filter. Free text, time modifiers etc. -> None."""
+    index/sourcetype/source terms select the table via match_source(); other
+    terms become a where / filter. Free text, time modifiers etc. -> None."""
     from . import schema, search
     try:
         meta, ast = search.parse(stage)
@@ -133,23 +163,22 @@ def first_stage(stage: str, target: str):
         return None
     if not meta:
         return None
-    table_text = None
-    for key, tgt in _load_sources().items():
-        if search.parse_meta(key) == meta and target in tgt:
-            table_text = tgt[target]
-            break
-    if table_text is None:
+    matched = match_source(meta, target)
+    if matched is None:
         return None
+    table_text, dropped_index, by = matched
     table = schema.table_of(table_text, target)
-    if ast is None:
-        out = Out(table_text)
-    else:
+    warnings, reads, text = [], [], table_text
+    if dropped_index:
+        warnings.append(INDEX_DROPPED_WARNING.format(T=target.upper(), index=dropped_index, by=by))
+    if ast is not None:
         r = search.render(ast, target, lambda f: schema.field_type(table, target, f))
         if r is None:
             return None
         op = "where" if target == "kql" else "filter"
         text = f"{table_text}\n| {op} {r.text}"
-        out = Flagged(text, r.warnings, reads=r.reads) if r.warnings else Out(text, reads=r.reads)
+        warnings, reads = warnings + r.warnings, r.reads
+    out = Flagged(text, warnings, reads=reads) if warnings else Out(text, reads=reads)
     out.table = table
     return out
 

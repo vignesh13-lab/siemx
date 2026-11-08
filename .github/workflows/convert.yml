@@ -4,6 +4,15 @@ on:
     branches: [main]
     paths: ["detections/spl/**", "mappings/**", "gold/**", "siemx/**"]
   workflow_dispatch:
+    inputs:
+      client:
+        description: "Client name (uses mappings/clients/<client>/, writes converted/<client>/). Empty = shared mappings only."
+        required: false
+        default: ""
+      path:
+        description: "Only convert detections/spl/<path>/** (optional)"
+        required: false
+        default: ""
   schedule:
     - cron: "0 2 * * 0"   # weekly full recheck after docs/model changes
 
@@ -14,6 +23,9 @@ permissions:
 jobs:
   convert:
     runs-on: ubuntu-latest
+    env:
+      SIEMX_CLIENT: ${{ inputs.client }}
+      SIEMX_PATH: ${{ inputs.path }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,16 +34,16 @@ jobs:
       - name: Convert (unchanged files are skipped by hash)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: siemx convert --workers 4 | tee run.jsonl
+        run: siemx convert --workers 4 ${SIEMX_PATH:+--path "$SIEMX_PATH"} | tee run.jsonl
       - name: Summary
         run: |
-          echo "### siemx status" >> "$GITHUB_STEP_SUMMARY"
+          echo "### siemx status ${SIEMX_CLIENT:-(shared mappings)}" >> "$GITHUB_STEP_SUMMARY"
           siemx status >> "$GITHUB_STEP_SUMMARY"
       - name: Open PR with converted queries
         uses: peter-evans/create-pull-request@v6
         with:
-          branch: bot/siemx-conversions
-          title: "siemx: converted detections"
+          branch: bot/siemx-conversions${{ inputs.client && format('-{0}', inputs.client) || '' }}
+          title: "siemx: converted detections${{ inputs.client && format(' ({0})', inputs.client) || '' }}"
           commit-message: "siemx: update converted queries"
           body: "Auto-converted. Review items marked needs-review/unsupported (run `siemx review`)."
           add-paths: converted/**

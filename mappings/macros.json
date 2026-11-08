@@ -1,0 +1,3 @@
+{
+  "_readme": "Shared Splunk macro definitions used by all clients: {\"macro_name\": \"definition\"}. A detection's `macro_name` is replaced by the definition before conversion. Client-specific macros go in mappings/clients/<client>/macros.json and override these. Macros with arguments, e.g. `name(x)`, are not expanded."
+}

@@ -1,0 +1,4 @@
+{
+  "_readme": "SAMPLE client. Client index names -> target table/dataset. Overrides mappings/sources.json. Use with: siemx convert --client example",
+  "index=example_win": {"kql": "SecurityEvent", "xql": "dataset = xdr_data"}
+}

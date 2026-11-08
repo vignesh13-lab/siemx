@@ -1,0 +1,4 @@
+{
+  "_readme": "SAMPLE client macros: this client's definitions of shared macro names.",
+  "win_security": "index=example_win"
+}

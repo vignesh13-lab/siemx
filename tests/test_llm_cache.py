@@ -84,7 +84,7 @@ def test_meta_model_only_for_llm(workspace, fake_model):
     (src / "llm.spl").write_text("index=wineventlog | transaction host")
     pipeline.run(["kql"], workers=1)
     pipeline.run(["kql"], workers=1, force=True)
-    meta = {p.stem: json.loads(p.read_text()) for p in config.META_DIR.glob("*.json")}
+    meta = {p.stem: json.loads(p.read_text()) for p in config.META_DIR.rglob("*.json")}
     assert meta["rules.kql"]["model"] is None and meta["rules.kql"]["method"] == "rules"
     assert meta["llm.kql"]["model"] == llm.MODEL and meta["llm.kql"]["cached"] is True
     assert len(fake_model) == 1                      # second (forced) run hit the cache

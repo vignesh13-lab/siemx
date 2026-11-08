@@ -142,7 +142,8 @@ def parse(text: str):
     for node in items:
         if node[0] == "term" and node[1].lower() in META:
             key = node[1].lower()
-            if node[2] != "=" or "*" in node[3] or key in meta:
+            # wildcards only for index (a storage location; see rules.match_source)
+            if node[2] != "=" or key in meta or ("*" in node[3] and key != "index"):
                 raise _Unsupported("unsupported metadata term")
             meta[key] = node[3].lower()
         else:
