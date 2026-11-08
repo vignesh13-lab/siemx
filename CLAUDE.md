@@ -196,7 +196,13 @@ pytest -q
    Always flagged: keyword case sensitivity vs SPL, unmapped field names (ECS names are
    not seeded: map them in field_map.json under "elk"), missing "elk" index pattern in
    sources.json. ELK input files may start with `# index: <pattern>` (mapped back to a
-   Splunk source). Not done: ES|QL and EQL; KQL/XQL -> ELK.
+   Splunk source). Not done: ES|QL and EQL.
+11. DONE KQL / XQL -> ELK directly (siemx/to_elk.py; `--from kql|xql --to elk`), reading the
+   input with kql_expr / xql_expr and reverse(_xql) pipes/heads. Same filter-only policy as
+   SPL -> ELK. Time filters -> note (rule look-back). Case notes follow the source's
+   operator semantics. Field names chain through field_map.json: source column -> Splunk
+   field (exact kql/xql entry) -> Elastic field ("elk" entry). Gaps (has, regex, ...) go to
+   the LLM with build_to_elk_prompt (no base search).
 
 ## Open questions (need a human with access)
 - Elastic: index patterns per sourcetype and the ECS field names in use (field_map.json "elk").

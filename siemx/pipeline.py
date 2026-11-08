@@ -88,13 +88,15 @@ def convert_query(spl: str, target: str) -> dict:
     return out
 
 
-def convert_elk(spl: str) -> dict:
-    """SPL -> Kibana KQL (elk.py): filters only, so no stage-by-stage rules."""
-    from . import elk
-    res = elk.convert(spl)
+def convert_elk(text: str, source: str = "spl") -> dict:
+    """SPL / KQL / XQL -> Kibana KQL (elk.py, to_elk.py): filters only, so no
+    stage-by-stage rules."""
+    from . import elk, to_elk
+    res = elk.convert(text) if source == "spl" else to_elk.convert(text, source)
     if res is None:                                   # a filter the rules cannot read
-        out = llm_with_retry(spl, "elk")
-        out["no_rule"] = elk.missing_rules(spl)
+        out = llm_with_retry(text, "elk", source=source)
+        out["no_rule"] = (elk.missing_rules(text) if source == "spl"
+                          else to_elk.missing_rules(text, source))
         return out
     if res.get("query"):
         res["warnings"] += [f"validation: {p}" for p in validate.check(res["query"], "elk")]
@@ -208,6 +210,8 @@ def meta_path_for(path, target: str, source: str = "spl"):
 def convert_any(text: str, target: str, source: str = "spl") -> dict:
     if source == "spl":
         return convert_query(text, target)
+    if source in ("kql", "xql") and target == "elk":
+        return convert_elk(text, source)
     if source in ("kql", "xql", "elk") and target == "spl":
         from . import reverse, reverse_elk, reverse_xql
         res = {"kql": reverse, "xql": reverse_xql, "elk": reverse_elk}[source].convert(text)

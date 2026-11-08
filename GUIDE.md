@@ -172,9 +172,18 @@ Useful options:
 ### Elastic (Kibana KQL)
 
 ```powershell
-siemx convert --to elk          # detections/spl -> converted/elk/*.elk
-siemx convert --from elk        # detections/elk/*.elk -> converted/spl/*.spl
+siemx convert --to elk                # detections/spl -> converted/elk/*.elk
+siemx convert --from kql --to elk     # detections/kql (Sentinel) -> converted/elk
+siemx convert --from xql --to elk     # detections/xql (Cortex)   -> converted/elk
+siemx convert --from elk              # detections/elk/*.elk -> converted/spl/*.spl
 ```
+
+KQL and XQL go to Elastic directly, not through SPL. The same rules apply as below:
+`where` / `filter` convert, `project` / `fields` / `sort` are dropped with a note, and
+`summarize` / `comp` / `extend` / `alter` make the result unsupported (the filter part is
+kept). Time ranges (`TimeGenerated > ago(1d)`, `config timeframe`) are dropped with a note:
+in Elastic they are the rule's look-back. Case is flagged where the source compared
+case-insensitively: KQL `=~`, `contains`, `startswith`, `in~`, and XQL by default.
 
 Kibana KQL (the language in Kibana's search bar and in Elastic "custom query" rules)
 **only selects events**. It has no `stats`, `eval`, `table` or pipes. So:
@@ -347,5 +356,5 @@ Wrong patterns become new rules or tests, so the same mistake is caught next tim
 
 **What does it not handle yet?** Splunk commands without rules (for example
 `transaction`; the report lists them), XQL field names (needs the xdr_data field list),
-importing `savedsearches.conf` / YAML directly, Elastic's ES|QL and EQL (only Kibana KQL),
-and KQL/XQL straight to Elastic.
+importing `savedsearches.conf` / YAML directly, and Elastic's ES|QL and EQL (only Kibana
+KQL).
