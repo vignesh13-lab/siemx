@@ -21,7 +21,7 @@ EXT = {"kql": ".kql", "xql": ".xql"}
 CONF_AUTO_APPROVE = 0.85   # at or above this -> auto-approved
 
 # Bump whenever rules/prompts change output, so unchanged SPL is re-converted.
-CONVERTER_VERSION = "16"
+CONVERTER_VERSION = "17"
 
 
 def set_client(name: str | None) -> None:

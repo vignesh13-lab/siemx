@@ -1,0 +1,153 @@
+{
+  "_readme": "Splunk field -> target column, per target table, with an evidence level: exact (applied), conditional (applied + flagged with the note), ambiguous (not applied; flagged with candidates). There is no official complete crosswalk; client overrides go in mappings/clients/<client>/field_map.json (see siemx fields import-props). Every column must exist in mappings/fields.json.",
+  "kql": {
+    "SecurityEvent": {
+      "sources": [
+        "https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4624",
+        "https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4688",
+        "https://learn.microsoft.com/en-us/azure/azure-monitor/reference/tables/securityevent"
+      ],
+      "fields": {
+        "Source_Network_Address": {
+          "to": "IpAddress",
+          "level": "conditional",
+          "note": "classic WinEventLog field name (event label with underscores); the event docs pair the label with this XML name. Confirm with your add-on (siemx fields import-props)"
+        },
+        "Source_Port": {
+          "to": "IpPort",
+          "level": "conditional",
+          "note": "classic WinEventLog field name (event label with underscores); the event docs pair the label with this XML name. Confirm with your add-on (siemx fields import-props)"
+        },
+        "Workstation_Name": {
+          "to": "WorkstationName",
+          "level": "conditional",
+          "note": "classic WinEventLog field name (event label with underscores); the event docs pair the label with this XML name. Confirm with your add-on (siemx fields import-props)"
+        },
+        "Logon_Type": {
+          "to": "LogonType",
+          "level": "conditional",
+          "note": "classic WinEventLog field name (event label with underscores); the event docs pair the label with this XML name. Confirm with your add-on (siemx fields import-props)"
+        },
+        "Logon_Process": {
+          "to": "LogonProcessName",
+          "level": "conditional",
+          "note": "classic WinEventLog field name (event label with underscores); the event docs pair the label with this XML name. Confirm with your add-on (siemx fields import-props)"
+        },
+        "Authentication_Package": {
+          "to": "AuthenticationPackageName",
+          "level": "conditional",
+          "note": "classic WinEventLog field name (event label with underscores); the event docs pair the label with this XML name. Confirm with your add-on (siemx fields import-props)"
+        },
+        "Process_Name": {
+          "to": "ProcessName",
+          "level": "conditional",
+          "note": "4624 'Process Name' = ProcessName; classic WinEventLog field name (event label with underscores); the event docs pair the label with this XML name. Confirm with your add-on (siemx fields import-props)"
+        },
+        "New_Process_Name": {
+          "to": "NewProcessName",
+          "level": "conditional",
+          "note": "classic WinEventLog field name (event label with underscores); the event docs pair the label with this XML name. Confirm with your add-on (siemx fields import-props)"
+        },
+        "New_Process_ID": {
+          "to": "NewProcessId",
+          "level": "conditional",
+          "note": "classic WinEventLog field name (event label with underscores); the event docs pair the label with this XML name. Confirm with your add-on (siemx fields import-props)"
+        },
+        "Creator_Process_Name": {
+          "to": "ParentProcessName",
+          "level": "conditional",
+          "note": "classic WinEventLog field name (event label with underscores); the event docs pair the label with this XML name. Confirm with your add-on (siemx fields import-props)"
+        },
+        "Process_Command_Line": {
+          "to": "CommandLine",
+          "level": "conditional",
+          "note": "classic WinEventLog field name (event label with underscores); the event docs pair the label with this XML name. Confirm with your add-on (siemx fields import-props)"
+        },
+        "Token_Elevation_Type": {
+          "to": "TokenElevationType",
+          "level": "conditional",
+          "note": "classic WinEventLog field name (event label with underscores); the event docs pair the label with this XML name. Confirm with your add-on (siemx fields import-props)"
+        },
+        "Mandatory_Label": {
+          "to": "MandatoryLabel",
+          "level": "conditional",
+          "note": "classic WinEventLog field name (event label with underscores); the event docs pair the label with this XML name. Confirm with your add-on (siemx fields import-props)"
+        },
+        "ComputerName": {
+          "to": "Computer",
+          "level": "conditional",
+          "note": "classic WinEventLog name for the event's <Computer> element"
+        },
+        "EventCode": {
+          "to": "EventID",
+          "level": "conditional",
+          "note": "Splunk's Windows event ID field; SecurityEvent EventID is 'the identifier that the provider used to identify the event'"
+        },
+        "host": {
+          "to": "Computer",
+          "level": "conditional",
+          "note": "Splunk host = the machine that sent the event; equals the source computer only when the forwarder runs on it (not with Windows Event Forwarding collectors)"
+        },
+        "Account_Name": {
+          "level": "ambiguous",
+          "candidates": [
+            "TargetUserName",
+            "SubjectUserName"
+          ],
+          "note": "In 4624/4688 'Account Name' appears under Subject (SubjectUserName) and New Logon / Target Subject (TargetUserName)."
+        },
+        "Account_Domain": {
+          "level": "ambiguous",
+          "candidates": [
+            "TargetDomainName",
+            "SubjectDomainName"
+          ],
+          "note": "'Account Domain' appears under Subject and New Logon."
+        },
+        "Security_ID": {
+          "level": "ambiguous",
+          "candidates": [
+            "TargetUserSid",
+            "SubjectUserSid"
+          ],
+          "note": "'Security ID' appears under Subject and New Logon."
+        },
+        "Logon_ID": {
+          "level": "ambiguous",
+          "candidates": [
+            "TargetLogonId",
+            "SubjectLogonId"
+          ],
+          "note": "'Logon ID' appears under Subject and New Logon."
+        },
+        "user": {
+          "level": "ambiguous",
+          "candidates": [
+            "TargetUserName",
+            "SubjectUserName"
+          ],
+          "note": "CIM user depends on the event ID and the add-on's props.conf."
+        },
+        "src": {
+          "level": "ambiguous",
+          "candidates": [
+            "IpAddress",
+            "WorkstationName"
+          ],
+          "note": "CIM src may be an address or a host name depending on the event."
+        },
+        "src_ip": {
+          "to": "IpAddress",
+          "level": "conditional",
+          "note": "logon events (4624/4625): 'Source Network Address'"
+        },
+        "dest": {
+          "to": "Computer",
+          "level": "conditional",
+          "note": "events generated on the target machine (e.g. 4624: 'generates on the computer that was accessed')"
+        }
+      }
+    }
+  },
+  "xql": {}
+}

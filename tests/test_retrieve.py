@@ -97,7 +97,8 @@ def test_budget_limits_prompt_size(index):
 def test_llm_retrieve_without_index_is_empty(tmp_path, monkeypatch):
     from siemx import config
     monkeypatch.setattr(config, "ROOT", tmp_path)
-    assert llm.retrieve("index=x | transaction host", "kql") == {"docs": [], "examples": []}
+    assert llm.retrieve("index=x | transaction host", "kql") == {"docs": [], "examples": [],
+                                                             "field_map": {}}
 
 
 def test_llm_prompt_contains_docs(tmp_path, monkeypatch):

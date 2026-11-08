@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 from . import config
@@ -29,10 +30,25 @@ def retrieve(spl: str, target: str) -> dict:
     from . import docs, gold
     from . import retrieve as rag
     examples = gold.examples_for_prompt(spl, target, k=EXAMPLES_K)
+    fields = field_hints(spl, target)
     index = rag.get_index(docs.index_dir() / "chunks.jsonl")
     if index is None:
-        return {"docs": [], "examples": examples}
-    return {"docs": rag.retrieve(index, spl, target).docs, "examples": examples}
+        return {"docs": [], "examples": examples, "field_map": fields}
+    return {"docs": rag.retrieve(index, spl, target).docs, "examples": examples,
+            "field_map": fields}
+
+
+def field_hints(spl: str, target: str) -> dict:
+    """Field-map entries (mappings/field_map.json) for field names used in this SPL,
+    when the base search maps to a known table."""
+    from . import fieldmap, rules, triage
+    first = rules.first_stage(triage.split_stages(spl)[0], target)
+    table = getattr(first, "table", None)
+    if not table:
+        return {}
+    used = set(re.findall(r"[A-Za-z_][A-Za-z0-9_.]*", spl))
+    entries = {k: v for k, v in fieldmap.table_map(target, table).items() if k in used}
+    return {"table": table, "fields": entries} if entries else {}
 
 
 def build_prompt(spl: str, target: str) -> str:
@@ -44,6 +60,10 @@ def build_prompt(spl: str, target: str) -> str:
         "Verified examples (similar SPL already translated and checked; they show SYNTAX - "
         "their table and field names are illustrative, do not copy them):\n"
         f"{json.dumps(ctx['examples'], ensure_ascii=False)}\n\n"
+        "Field mapping for this table (SPL field -> target column; level exact = apply, "
+        "conditional = apply and add a warning with the note, ambiguous = do NOT choose, "
+        "add a warning naming the candidates):\n"
+        f"{json.dumps(ctx.get('field_map', {}), ensure_ascii=False)}\n\n"
         "Use only syntax shown in the reference docs or the verified examples. If something "
         "you need is not covered by them, add a warning instead of guessing.\n"
         'Return JSON: {"query": str, "confidence": 0-1, "warnings": [str], '
