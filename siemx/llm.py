@@ -297,5 +297,7 @@ def translate(spl: str, target: str, source: str = "spl", base: str | None = Non
         return {"query": "", "confidence": 0.0, "unsupported": True,
                 "warnings": [f"LLM step failed: {e}"], "tokens": 0}
     out.setdefault("warnings", [])
+    if out.get("unsupported"):
+        out["query"] = ""        # the model said "no equivalent": nothing to save or validate
     _cache_put(key, out)
     return out

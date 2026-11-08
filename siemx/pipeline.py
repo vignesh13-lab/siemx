@@ -119,8 +119,9 @@ def llm_with_retry(text: str, target: str, source: str = "spl", base: str | None
         out = llm.translate(retry_request(text, target, out.get("query", ""), problems), target,
                             source=source, base=base)
         out["method"] = "llm-retry"
-    out.setdefault("warnings", []).extend(
-        f"validation: {p}" for p in validate.check(out.get("query", ""), target))
+    if not out.get("unsupported"):
+        out.setdefault("warnings", []).extend(
+            f"validation: {p}" for p in validate.check(out.get("query", ""), target))
     out["validator"] = validate.status()[target]
     return out
 
