@@ -157,12 +157,19 @@ def mappings_hash() -> str:
 
 
 def is_current(meta_path, src_hash: str, map_hash: str) -> bool:
-    """True if this output was made from the same SPL, converter version and mappings."""
+    """True if this output was made from the same SPL, converter version and mappings.
+    A failed LLM call (no model configured, server down, timeout) is never current:
+    it is a setup problem, not an answer, so the next run tries again."""
     if not meta_path.exists():
         return False
     m = json.loads(meta_path.read_text())
+    if any(str(w).startswith(LLM_FAILED) for w in m.get("warnings") or []):
+        return False
     return (m.get("src_hash") == src_hash and m.get("converter") == config.CONVERTER_VERSION
             and m.get("mappings_hash") == map_hash)
+
+
+LLM_FAILED = "LLM step failed"
 
 
 SOURCES = {"spl": ".spl", "kql": ".kql", "xql": ".xql"}     # input language -> file extension

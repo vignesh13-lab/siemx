@@ -225,7 +225,22 @@ def parse_json(text: str) -> dict:
         return json.loads(text[start:end + 1])
 
 
+NO_MODEL = ("no AI model configured: set SIEMX_PROVIDER and SIEMX_MODEL (for example "
+            "ollama and qwen2.5-coder:7b) or ANTHROPIC_API_KEY; see GUIDE.md section 9")
+
+
+def configured() -> bool:
+    """False when the default provider has no key: every LLM step would fail."""
+    try:
+        s = settings()
+    except ValueError:
+        return False
+    return s["provider"] != "anthropic" or bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
 def _call_anthropic(prompt: str, s: dict) -> dict:
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise ValueError(NO_MODEL)
     import anthropic
     client = anthropic.Anthropic()
     resp = client.messages.create(
