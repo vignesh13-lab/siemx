@@ -108,6 +108,8 @@ def field_hints(spl: str, target: str) -> dict:
 def build_prompt(spl: str, target: str, source: str = "spl", base: str | None = None) -> str:
     if source != "spl" and target == "elk":
         return build_to_elk_prompt(spl, source)
+    if source == "elk" and target in ("kql", "xql"):
+        return build_from_elk_prompt(spl, target, base)
     if source != "spl":
         return build_reverse_prompt(spl, target, source, base)
     ctx = retrieve(spl, target)
@@ -178,6 +180,32 @@ def build_to_elk_prompt(text: str, source: str) -> str:
         "\n\nUse only syntax shown in the reference. "
         f"{TO_ELK_PITFALLS[source]} If something has no faithful Kibana KQL equivalent, answer "
         "unsupported instead of guessing.\n"
+        'Return JSON: {"query": str, "confidence": 0-1, "warnings": [str], '
+        '"unsupported": bool, "sources": [the URLs of the docs you relied on]}'
+    )
+
+
+FROM_ELK_PITFALLS = {
+    "kql": ("Kibana KQL keyword matching is exact and case-sensitive: use ==, in, contains_cs, "
+            "startswith_cs, endswith_cs (not =~ or contains)."),
+    "xql": ("Kibana KQL keyword matching is case-sensitive and XQL is not by default: start "
+            "with `config case_sensitive = true`. In XQL \"...\" a * is a wildcard. Always "
+            "parenthesize mixed and/or (XQL does not document their precedence)."),
+}
+
+
+def build_from_elk_prompt(text: str, target: str, base: str | None) -> str:
+    """Kibana KQL -> KQL / XQL. The table / dataset comes from mappings/sources.json."""
+    ctx = retrieve(text, target, source="elk")
+    return (
+        f"Translate this {NAMES['elk']} filter to {NAMES[target]}.\n\n"
+        f"Kibana KQL:\n{text}\n\n"
+        f"Query exactly this {'table' if target == 'kql' else 'dataset'}: {base}\n"
+        "Keep the field names as they are (they are mapped separately). A line starting "
+        "with `# index:` is a siemx header, not part of the query.\n\n"
+        f"Reference docs (each has its source URL):\n{json.dumps(ctx['docs'], ensure_ascii=False)}"
+        f"\n\n{FROM_ELK_PITFALLS[target]} Use only syntax you are sure of; if something has "
+        "no faithful equivalent, answer unsupported instead of guessing.\n"
         'Return JSON: {"query": str, "confidence": 0-1, "warnings": [str], '
         '"unsupported": bool, "sources": [the URLs of the docs you relied on]}'
     )

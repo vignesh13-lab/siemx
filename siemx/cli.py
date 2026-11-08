@@ -20,7 +20,7 @@ def main():
     c = sub.add_parser("convert", parents=[client],
                        help="convert detections/spl/** (skips unchanged files)")
     c.add_argument("--to", help="targets, comma-separated. From spl: kql, xql, elk (default "
-                                "kql,xql). From kql or xql: spl (default) or elk. From elk: spl")
+                                "kql,xql). From kql or xql: spl (default) or elk. From elk: spl (default), kql, xql")
     c.add_argument("--workers", type=int, default=None,
                    help="parallel conversions (default 4; 1 with ollama, which runs one request at a time)")
     c.add_argument("--force", action="store_true")
@@ -146,7 +146,7 @@ def main():
             print(f"note: {llm.NO_MODEL}. Queries that need the AI will be marked "
                   "unsupported and retried on the next run.", file=sys.stderr)
         allowed = {"spl": ("kql", "xql", "elk"), "kql": ("spl", "elk"),
-                   "xql": ("spl", "elk"), "elk": ("spl",)}[a.source]
+                   "xql": ("spl", "elk"), "elk": ("spl", "kql", "xql")}[a.source]
         targets = (a.to or ("kql,xql" if a.source == "spl" else "spl")).split(",")
         bad = [t for t in targets if t not in allowed]
         if bad:
