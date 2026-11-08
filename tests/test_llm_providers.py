@@ -200,3 +200,10 @@ def test_failed_llm_step_is_retried_next_run(workspace, monkeypatch):
     monkeypatch.setattr(llm, "translate", lambda *a, **k: dict(ANSWER))   # model now set up
     assert pipeline.run(["kql"], workers=1) == {"needs-review": 1}         # not skipped
     assert pipeline.run(["kql"], workers=1) == {"skipped": 1}              # a real answer is kept
+
+
+def test_ollama_runs_one_request_at_a_time(monkeypatch):
+    """4 parallel requests to one local Ollama queue up and time out."""
+    assert llm.default_workers() == 4
+    monkeypatch.setenv("SIEMX_PROVIDER", "ollama")
+    assert llm.default_workers() == 1

@@ -229,6 +229,15 @@ NO_MODEL = ("no AI model configured: set SIEMX_PROVIDER and SIEMX_MODEL (for exa
             "ollama and qwen2.5-coder:7b) or ANTHROPIC_API_KEY; see GUIDE.md section 9")
 
 
+def default_workers() -> int:
+    """A local Ollama answers one request at a time: parallel requests only queue up
+    behind each other until they hit SIEMX_TIMEOUT. Hosted APIs handle 4 at once."""
+    try:
+        return 1 if settings()["provider"] == "ollama" else 4
+    except ValueError:
+        return 4
+
+
 def configured() -> bool:
     """False when the default provider has no key: every LLM step would fail."""
     try:
