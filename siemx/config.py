@@ -27,6 +27,7 @@ CONVERTER_VERSION = "16"
 def set_client(name: str | None) -> None:
     """Select a client: its mapping overrides and its own output folder."""
     global CLIENT, OUT_DIR, META_DIR
+    name = name or None                    # "" (e.g. an empty CI input) = no client
     if name is None and CLIENT is None:
         return                             # nothing selected: keep the default folders
     if name is not None and not re.fullmatch(r"[A-Za-z0-9_-]+", name):

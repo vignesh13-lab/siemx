@@ -10,7 +10,8 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     client = argparse.ArgumentParser(add_help=False)
-    client.add_argument("--client", default=os.environ.get("SIEMX_CLIENT"),
+    # `or None`: GitHub Actions passes SIEMX_CLIENT="" on push events (no workflow input)
+    client.add_argument("--client", default=os.environ.get("SIEMX_CLIENT") or None,
                         help="use mappings/clients/<client>/ and write to converted/<client>/ "
                              "(default: $SIEMX_CLIENT, else shared mappings only)")
 
