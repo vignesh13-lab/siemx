@@ -56,33 +56,54 @@ def evaluate_examples(pairs: list[dict], cases: list[dict], k: int = 3) -> dict:
     return report
 
 
-def reverse_cases(pairs: list[dict]) -> list[dict]:
-    """KQL -> SPL cases from gold pairs read backwards: the query is the pair's KQL, the
-    expected names are the SPL commands of its verified SPL (base search excluded)."""
+def reverse_cases(pairs: list[dict], source: str = "kql") -> list[dict]:
+    """KQL/XQL -> SPL cases from gold pairs read backwards: the query is the pair's KQL
+    (or XQL), the expected names are the SPL commands of its verified SPL (base search
+    excluded)."""
     from .triage import split_stages
     out = []
     for p in pairs:
-        if not p.get("kql"):
+        if not p.get(source):
             continue
         cmds = [st.split()[0].lower() for st in split_stages(p["spl"])[1:] if st.split()]
         if cmds:
-            out.append({"kql": p["kql"], "spl": list(dict.fromkeys(cmds))})
+            out.append({"query": p[source], "spl": list(dict.fromkeys(cmds))})
     return out
 
 
-def evaluate_reverse(index, cases: list[dict], retrieve_fn) -> dict:
-    """retrieve_fn(index, kql, 'spl', source='kql') -> Retrieved; scores SPL chunks only."""
+def evaluate_reverse(index, cases: list[dict], retrieve_fn, source: str = "kql") -> dict:
+    """retrieve_fn(index, query, 'spl', source=source) -> Retrieved; scores SPL chunks only."""
     rows = []
     for case in cases:
-        res = retrieve_fn(index, case["kql"], "spl", source="kql")
+        res = retrieve_fn(index, case["query"], "spl", source=source)
         names = [d["names"] for d in res.docs if d["lang"] == "spl"]
-        rows.append({"kql": case["kql"], **score_case(names, case["spl"])})
+        rows.append({"query": case["query"], **score_case(names, case["spl"])})
     n = len(rows) or 1
     return {"cases": len(rows),
             "hit": round(sum(r["hit"] for r in rows) / n, 3),
             "recall": round(sum(r["recall"] for r in rows) / n, 3),
             "mrr": round(sum(r["mrr"] for r in rows) / n, 3),
             "misses": [r for r in rows if r["missing"]]}
+
+
+def reverse_prompt_coverage(index, pairs: list[dict], source: str, retrieve_fn, k: int = 3) -> dict:
+    """What the reverse PROMPT shows: per case, are the expected SPL commands in the
+    retrieved docs or in the gold examples (the case's own pair excluded: no leakage)?"""
+    from .gold import similar_reverse
+    cases = reverse_cases(pairs, source)
+    ex_hit = ex_recall = covered = 0
+    for c in cases:
+        shown = {w for _, p in similar_reverse(pairs, c["query"], source, k, exclude=c["query"])
+                 for w in names_in_query(p["spl"])}
+        got = [e for e in c["spl"] if e in shown]
+        ex_hit += bool(got)
+        ex_recall += len(got) / len(c["spl"])
+        res = retrieve_fn(index, c["query"], "spl", source=source)
+        doc_names = {n for d in res.docs if d["lang"] == "spl" for n in d["names"]}
+        covered += all(e in shown or e in doc_names for e in c["spl"])
+    n = len(cases) or 1
+    return {"cases": len(cases), "examples_hit": round(ex_hit / n, 3),
+            "examples_recall": round(ex_recall / n, 3), "covered": round(covered / n, 3)}
 
 
 def evaluate(index, cases: list[dict], retrieve_fn) -> dict:

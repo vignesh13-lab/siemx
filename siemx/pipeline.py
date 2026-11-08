@@ -137,7 +137,7 @@ def is_current(meta_path, src_hash: str, map_hash: str) -> bool:
             and m.get("mappings_hash") == map_hash)
 
 
-SOURCES = {"spl": ".spl", "kql": ".kql"}     # input language -> file extension
+SOURCES = {"spl": ".spl", "kql": ".kql", "xql": ".xql"}     # input language -> file extension
 
 
 def source_dir(source: str = "spl") -> tuple[Path, Path]:
@@ -157,18 +157,18 @@ def meta_path_for(path, target: str, source: str = "spl"):
 def convert_any(text: str, target: str, source: str = "spl") -> dict:
     if source == "spl":
         return convert_query(text, target)
-    if source == "kql" and target == "spl":
-        from . import reverse
-        res = reverse.convert(text)
+    if source in ("kql", "xql") and target == "spl":
+        from . import reverse, reverse_xql
+        res = (reverse if source == "kql" else reverse_xql).convert(text)
         if res.get("unsupported") and res.get("llm_base"):
-            rule_gap = res["warnings"]
-            res = llm_with_retry(text, "spl", source="kql", base=res["llm_base"])
+            rule_gap, table = res["warnings"], res.get("llm_table")
+            res = llm_with_retry(text, "spl", source=source, base=res["llm_base"])
             res["no_rule"] = [w.removeprefix("not converted: ") for w in rule_gap]
             if not res.get("unsupported"):
-                # the model keeps KQL column names (as told); a person must map them
-                table = reverse.split_pipes(text)[0].strip()
+                # the model keeps the source column names (as told); a person must map them
+                kind = "KQL table" if source == "kql" else "XQL dataset"
                 res.setdefault("warnings", []).append(
-                    f"SPL: LLM translation keeps the KQL table's column names ({table}); "
+                    f"SPL: LLM translation keeps the {kind}'s column names ({table}); "
                     "map them to your Splunk field names")
         return res
     raise ValueError(f"no conversion from {source} to {target}")

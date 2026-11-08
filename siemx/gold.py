@@ -217,16 +217,28 @@ def kql_features(kql: str) -> set[str]:
     return {n for st in split_pipes(kql)[1:] for n in kql_names(st)}
 
 
+def xql_features(xql: str) -> set[str]:
+    """Stages + functions, without the config/dataset head."""
+    from .retrieve import xql_names
+    from .reverse import split_pipes
+    names = {n for st in split_pipes(xql) for n in xql_names(st)}
+    return names - {"config", "dataset"}
+
+
+def features(query: str, source: str) -> set[str]:
+    return kql_features(query) if source == "kql" else xql_features(query)
+
+
 def similar_reverse(pairs: list[dict], query: str, source: str, k: int = 3,
                     exclude: str | None = None) -> list[tuple[float, dict]]:
-    """Gold pairs read backwards: rank by shared KQL operators/functions."""
-    feats = kql_features(query)
+    """Gold pairs read backwards: rank by shared operators/stages and functions."""
+    feats = features(query, source)
     skip = normalize(exclude) if exclude else None
     scored = []
     for p in pairs:
         if not p.get(source) or (skip and normalize(p[source]) == skip):
             continue
-        pf = kql_features(p[source])
+        pf = features(p[source], source)
         union = feats | pf
         if feats & pf:
             scored.append((len(feats & pf) / len(union), p))

@@ -200,7 +200,7 @@ def test_reverse_eval_cases_and_scores():
         {"spl": "index=a", "kql": "T"},                                     # no commands: skipped
         {"spl": "index=a | head 1"},                                        # no KQL: skipped
     ])
-    assert cases == [{"kql": "T | summarize count() by h", "spl": ["stats", "sort"]}]
+    assert cases == [{"query": "T | summarize count() by h", "spl": ["stats", "sort"]}]
 
     def fake(index, q, target, source):
         assert (target, source) == ("spl", "kql")

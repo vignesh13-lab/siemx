@@ -136,10 +136,21 @@ def operator_of(stage: str) -> tuple[str, str]:
 
 # ---- table -> base search ------------------------------------------------------------------------
 
-def base_search_for(table: str) -> tuple[str, list[str]]:
+def source_name(value, lang: str) -> str | None:
+    """The table / dataset a sources.json entry names: 'SecurityEvent', or for XQL
+    'dataset = xdr_data' -> 'xdr_data' (dataset names are case-insensitive: dataset.md)."""
+    v = str(value or "").strip()
+    if lang == "xql":
+        m = re.fullmatch(r"dataset\s*=?\s*([A-Za-z0-9_]+)", v, re.I)
+        return m.group(1).lower() if m else None
+    return v or None
+
+
+def base_search_for(table: str, lang: str = "kql") -> tuple[str, list[str]]:
     from .rules import _load_sources
+    want = table.lower() if lang == "xql" else table
     keys = [k for k, v in _load_sources().items()
-            if isinstance(v, dict) and str(v.get("kql", "")).strip() == table]
+            if isinstance(v, dict) and source_name(v.get(lang), lang) == want]
     if not keys:
         raise Unsupported(f"no SPL source in mappings/sources.json maps to {table}")
     keys.sort(key=lambda k: (-len(search.parse_meta(k) or {}), k))   # most specific first
@@ -150,10 +161,10 @@ def base_search_for(table: str) -> tuple[str, list[str]]:
     return keys[0], warnings
 
 
-def reverse_field_names(table: str) -> dict[str, str]:
+def reverse_field_names(table: str, lang: str = "kql") -> dict[str, str]:
     """Column -> Splunk field from EXACT entries only (e.g. a client's props.conf)."""
     out = {}
-    for spl_name, e in fieldmap.table_map("kql", table).items():
+    for spl_name, e in fieldmap.table_map(lang, table).items():
         if e.get("level") == "exact" and e.get("to"):
             out.setdefault(e["to"], spl_name)
     return out
@@ -371,7 +382,7 @@ def convert(kql: str) -> dict:
                 out.append(spl)
     except (Unsupported, kql_expr.Unsupported) as e:
         # a rule gap (operator / expression): the LLM may translate it with this base search
-        return _unsupported(str(e), llm_base=base)
+        return _unsupported(str(e), llm_base=base, llm_table=table)
     if ctx["earliest"]:
         base = f"{base} earliest={ctx['earliest']}"
     mapped = set(ctx["rename"].values())
@@ -383,7 +394,9 @@ def convert(kql: str) -> dict:
             "warnings": list(dict.fromkeys(ctx["warnings"])), "tokens": 0}
 
 
-def _unsupported(reason: str, llm_base: str | None = None) -> dict:
-    """llm_base set = a rule gap the LLM fallback may handle, using this SPL base search."""
+def _unsupported(reason: str, llm_base: str | None = None, llm_table: str | None = None) -> dict:
+    """llm_base set = a rule gap the LLM fallback may handle, using this SPL base search
+    (llm_table: the KQL table / XQL dataset, for the column-name warning)."""
     return {"query": "", "confidence": 0.0, "method": "rules", "unsupported": True,
-            "warnings": [f"not converted: {reason}"], "tokens": 0, "llm_base": llm_base}
+            "warnings": [f"not converted: {reason}"], "tokens": 0, "llm_base": llm_base,
+            "llm_table": llm_table}

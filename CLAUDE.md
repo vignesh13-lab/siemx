@@ -149,7 +149,24 @@ pytest -q
    `siemx docs eval --reverse`: 24 gold pairs read backwards, hybrid hit 0.96 / recall
    0.92 / MRR 0.50 (BM25 alone 0.29). Known misses: arg_max->dedup, extract->rex,
    bin->timechart (KQL function vs SPL command).
-   NEXT: part 3 XQL -> SPL (no official parser).
+   PART 3 DONE: XQL -> SPL (siemx/reverse_xql.py, siemx/xql_expr.py), `--from xql`.
+   No official XQL parser: input checked for balance + stage/function names against the
+   official reference (// comments stripped first); failing input -> unsupported, no LLM.
+   config timeframe = N<S|M|H|D|W> -> earliest= (M = minutes; MO/Y not translated);
+   no dataset stage = xdr_data (documented default); dataset in/preset/datamodel -> no LLM.
+   XQL string comparison is case-INSENSITIVE by default (stages/config.md) -> lower(x)==
+   "<lowercased>"; config case_sensitive = true -> plain ==. "..." * wildcard -> like().
+   and/or mixed without parentheses, `not` without parentheses -> unsupported (XQL
+   precedence not documented). sort needs asc/desc and comp needs `as` (defaults not
+   documented). filter/alter/fields/comp/sort/limit/dedup; other stages -> LLM fallback
+   with the base search (+ earliest). All 19 gold XQL targets convert back by rules.
+   Retrieval: no official XQL bridge exists (the Cortex "Translate to XQL" page lost its
+   XQL column: the cells hold the SPL query's tail), and a bridge from our own rules
+   would make the eval circular. Docs alone: hybrid hit 0.45; gold examples read
+   backwards: hit 0.95; prompt shows every expected SPL command (docs OR examples) 0.95.
+   FOLLOW-UP: forward SPL -> XQL warns "XQL case sensitivity not documented"; it IS
+   documented (default insensitive): SPL where == is case-sensitive, so the forward
+   output over-matches; consider emitting `config case_sensitive = true`.
 8. DONE siemx report (siemx/report.py): converted/<client>/_report/report.md + summary.csv
    (summary per source, warning categories, SPL commands without rules, review accuracy by
    status/method/target/command, LLM auto-approval threshold analysis), --mkdocs writes a
