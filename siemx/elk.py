@@ -375,6 +375,8 @@ W_NO_SOURCE = ("ELK: the SPL names no index or sourcetype; choose the index patt
                "Elastic rule")
 W_FIELDS = ("ELK: field names kept from Splunk ({fields}); map them to your Elastic (ECS) "
             "field names in mappings/field_map.json under \"elk\"")
+W_WILD_TYPE = ("ELK: {field} has the {type} type in Elastic, and Kibana KQL fails with an error "
+               "on a wildcard there (KQL docs); rewrite the value (for an ip field, a CIDR range)")
 W_DISPLAY = ("ELK: {cmds} dropped: they choose or order columns, which Kibana KQL cannot do "
              "(set the columns in Discover / the rule); the events matched are the same")
 W_TRANSFORM = ("ELK: Kibana KQL only selects events; {cmds} {verb} no equivalent. {what}"
@@ -422,6 +424,11 @@ class _Render:
         if re.search(r"[A-Za-z]", v) and f not in self.case_fields:
             self.case_fields.append(f)
         if "*" in v:
+            ftype = (self.field_map.get(f) or {}).get("type")
+            if ftype and ftype not in ("keyword", "text", "wildcard"):
+                w = W_WILD_TYPE.format(field=self.applied.get(f, f), type=ftype)
+                if w not in self.warnings:
+                    self.warnings.append(w)
             return unquoted_wild(v)
         return v if _NUM.fullmatch(v) else quote(v)
 

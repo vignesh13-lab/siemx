@@ -149,5 +149,193 @@
       }
     }
   },
-  "xql": {}
+  "xql": {
+    "xdr_data": {
+      "sources": [
+        "https://cortex-docs.paloaltonetworks.com/cortex-xdr-3.x/cortex-xdr-3.x-documentation/data-management/xdr-collectors/add-an-xdr-collector-profile-for-windows/query-windows-event-log-records.md"
+      ],
+      "_note": "Windows Event Log records in xdr_data (XDR Collector). Only the fields below are columns; EventData values (TargetUserName, NewProcessName, CommandLine, ...) are inside action_evtlog_data_fields, a JSON string (json_extract_scalar), so they are not mapped by rules. Do not use event_id: it is an internal identifier.",
+      "fields": {
+        "EventCode": {
+          "to": "action_evtlog_event_id",
+          "level": "conditional",
+          "note": "Windows Event Log records only (event_type 15); the docs say to filter by this field, not event_id"
+        },
+        "ComputerName": {
+          "to": "agent_hostname",
+          "level": "conditional",
+          "note": "the hostname of the source machine"
+        },
+        "host": {
+          "to": "agent_hostname",
+          "level": "conditional",
+          "note": "Splunk host = the machine that sent the event; agent_hostname = the source machine; differs for forwarded events"
+        },
+        "dest": {
+          "to": "agent_hostname",
+          "level": "conditional",
+          "note": "CIM dest for Windows Security = the computer that logged the event"
+        }
+      }
+    }
+  },
+  "elk": {
+    "logs-system.security-*": {
+      "sources": [
+        "https://github.com/elastic/integrations/blob/main/packages/system/data_stream/security/elasticsearch/ingest_pipeline/standard.yml",
+        "https://github.com/elastic/integrations/blob/main/packages/system/data_stream/security/sample_event.json"
+      ],
+      "_note": "Elastic System integration, data stream system.security (Windows Security channel). Raw EventData stays under winlog.event_data.* unless the pipeline moves it to ECS (then it is removed from event_data).",
+      "fields": {
+        "EventCode": {
+          "to": "event.code",
+          "level": "conditional",
+          "note": "event.code holds the Windows event ID as a keyword (sample_event.json: event.code = winlog.event_id)"
+        },
+        "ComputerName": {
+          "to": "winlog.computer_name",
+          "level": "conditional",
+          "note": "the computer that logged the event (Windows Computer element)"
+        },
+        "host": {
+          "to": "host.name",
+          "level": "conditional",
+          "note": "Splunk host = the machine that sent the event; Elastic host.name = the agent's host; they differ for forwarded (WEF) events"
+        },
+        "dest": {
+          "to": "winlog.computer_name",
+          "level": "conditional",
+          "note": "CIM dest for Windows Security = the computer that logged the event"
+        },
+        "Source_Network_Address": {
+          "to": "source.ip",
+          "level": "conditional",
+          "note": "authentication events (Elastic pipeline 'Rename Common Auth Fields': 4624, 4625, 4648, 4768-4771, ...); '-' values are dropped",
+          "type": "ip"
+        },
+        "src_ip": {
+          "to": "source.ip",
+          "level": "conditional",
+          "note": "authentication events (Elastic pipeline 'Rename Common Auth Fields': 4624, 4625, 4648, 4768-4771, ...); '-' values are dropped",
+          "type": "ip"
+        },
+        "Source_Port": {
+          "to": "source.port",
+          "level": "conditional",
+          "note": "authentication events (Elastic pipeline 'Rename Common Auth Fields': 4624, 4625, 4648, 4768-4771, ...); '-' values are dropped; stored as a number",
+          "type": "long"
+        },
+        "Workstation_Name": {
+          "to": "source.domain",
+          "level": "conditional",
+          "note": "authentication events (Elastic pipeline 'Rename Common Auth Fields': 4624, 4625, 4648, 4768-4771, ...); '-' values are dropped"
+        },
+        "Logon_Type": {
+          "to": "winlog.event_data.LogonType",
+          "level": "conditional",
+          "note": "raw number kept; winlog.logon.type holds the name instead (3 = Network, 10 = RemoteInteractive)"
+        },
+        "Logon_Process": {
+          "to": "winlog.event_data.LogonProcessName",
+          "level": "conditional",
+          "note": "raw EventData field, not moved by the pipeline"
+        },
+        "Authentication_Package": {
+          "to": "winlog.event_data.AuthenticationPackageName",
+          "level": "conditional",
+          "note": "raw EventData field, not moved by the pipeline"
+        },
+        "Process_Name": {
+          "to": "process.executable",
+          "level": "conditional",
+          "note": "events with a ProcessName field (authentication events); full path"
+        },
+        "New_Process_Name": {
+          "to": "process.executable",
+          "level": "conditional",
+          "note": "event 4688 only (Elastic pipeline 'Process Event 4688'); full path"
+        },
+        "New_Process_ID": {
+          "to": "process.pid",
+          "level": "conditional",
+          "note": "event 4688 only (Elastic pipeline 'Process Event 4688'); Elastic stores a number (0x1a2 -> 418), Windows shows hex",
+          "type": "long"
+        },
+        "Creator_Process_Name": {
+          "to": "process.parent.executable",
+          "level": "conditional",
+          "note": "event 4688 only (Elastic pipeline 'Process Event 4688')"
+        },
+        "Process_Command_Line": {
+          "to": "process.command_line",
+          "level": "conditional",
+          "note": "event 4688 only (Elastic pipeline 'Process Event 4688'); needs command-line auditing enabled"
+        },
+        "Token_Elevation_Type": {
+          "to": "winlog.event_data.TokenElevationType",
+          "level": "conditional",
+          "note": "raw EventData value (%%1936 / %%1937 / %%1938); Splunk classic logs show 'TokenElevationTypeFull (2)': rewrite values; verify"
+        },
+        "Mandatory_Label": {
+          "to": "winlog.event_data.MandatoryLabel",
+          "level": "conditional",
+          "note": "raw EventData field, not moved by the pipeline"
+        },
+        "Account_Name": {
+          "level": "ambiguous",
+          "candidates": [
+            "user.name",
+            "user.target.name",
+            "winlog.event_data.TargetUserName",
+            "winlog.event_data.SubjectUserName"
+          ],
+          "note": "subject or target account; Elastic fills user.name from SubjectUserName or TargetUserName depending on the event code"
+        },
+        "user": {
+          "level": "ambiguous",
+          "candidates": [
+            "user.name",
+            "user.target.name",
+            "winlog.event_data.TargetUserName",
+            "winlog.event_data.SubjectUserName"
+          ],
+          "note": "subject or target account, depends on the event code"
+        },
+        "Account_Domain": {
+          "level": "ambiguous",
+          "candidates": [
+            "user.domain",
+            "user.target.domain"
+          ],
+          "note": "subject or target domain, depends on the event code"
+        },
+        "Security_ID": {
+          "level": "ambiguous",
+          "candidates": [
+            "user.id",
+            "user.target.id"
+          ],
+          "note": "subject or target SID, depends on the event code"
+        },
+        "Logon_ID": {
+          "level": "ambiguous",
+          "candidates": [
+            "winlog.logon.id",
+            "winlog.event_data.TargetLogonId",
+            "winlog.event_data.SubjectLogonId"
+          ],
+          "note": "winlog.logon.id is copied from TargetLogonId or SubjectLogonId depending on the event"
+        },
+        "src": {
+          "level": "ambiguous",
+          "candidates": [
+            "source.ip",
+            "source.domain"
+          ],
+          "note": "IP address or workstation name"
+        }
+      },
+      "_types": "type = the ECS field type (https://www.elastic.co/docs/reference/ecs): source.ip ip, source.port long, process.pid long; Kibana KQL wildcards fail on non-string types"
+    }
+  }
 }

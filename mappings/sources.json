@@ -1,3 +1,10 @@
 {
-  "index=wineventlog": {"kql": "SecurityEvent", "xql": "dataset = xdr_data"}
+  "_readme": "Splunk source -> Sentinel table (kql), Cortex dataset (xql), Elastic index pattern (elk). Keys are Splunk metadata terms. Sources and caveats: mappings/SOURCES.md.",
+  "index=wineventlog": {"kql": "SecurityEvent", "xql": "dataset = xdr_data"},
+  "sourcetype=XmlWinEventLog source=XmlWinEventLog:Security": {"kql": "SecurityEvent", "xql": "dataset = xdr_data", "elk": "logs-system.security-*"},
+  "source=XmlWinEventLog:Security": {"kql": "SecurityEvent", "xql": "dataset = xdr_data", "elk": "logs-system.security-*"},
+  "sourcetype=WinEventLog source=WinEventLog:Security": {"kql": "SecurityEvent", "xql": "dataset = xdr_data", "elk": "logs-system.security-*"},
+  "source=WinEventLog:Security": {"kql": "SecurityEvent", "xql": "dataset = xdr_data", "elk": "logs-system.security-*"},
+  "sourcetype=WinEventLog:Security": {"kql": "SecurityEvent", "xql": "dataset = xdr_data", "elk": "logs-system.security-*"},
+  "sourcetype=XmlWinEventLog:Security": {"kql": "SecurityEvent", "xql": "dataset = xdr_data", "elk": "logs-system.security-*"}
 }
