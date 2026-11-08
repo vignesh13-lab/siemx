@@ -37,6 +37,11 @@ def test_tokens_keep_names_and_parts():
         "project-rename", "project", "rename", "arg_max", "arg", "max", "count"]
 
 
+def test_code_keywords_are_not_stopwords():
+    """`where`, `if`, `not`, `has` are English filler but SPL/KQL keywords."""
+    assert retrieve.tokens("where if not has the of") == ["where", "if", "not", "has"]
+
+
 def test_language_filter(index):
     hits = index.search("session count", lang="kql", k=10)
     assert hits and all(h.chunk.lang == "kql" for h in hits)

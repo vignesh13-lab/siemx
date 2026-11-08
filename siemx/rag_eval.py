@@ -29,6 +29,33 @@ def score_case(retrieved_names: list[list[str]], expected: list[str]) -> dict:
             "mrr": 1 / rank if rank else 0.0, "missing": sorted(set(expected) - found)}
 
 
+def names_in_query(query: str) -> set[str]:
+    """Words of a translated query, e.g. 'extend n = strlen(cmd)' -> {'extend', 'strlen', ...}."""
+    from .retrieve import tokens
+    return set(tokens(query))
+
+
+def evaluate_examples(pairs: list[dict], cases: list[dict], k: int = 3) -> dict:
+    """Do the retrieved gold examples SHOW an expected target name (e.g. strlen)?
+    The exact SPL of a case is excluded from its own examples (no leakage)."""
+    from . import gold
+    report = {}
+    for target in ("kql", "xql"):
+        rows = []
+        for case in cases:
+            if not case.get(target):
+                continue
+            ex = gold.similar(pairs, case["spl"], target, k=k, exclude_spl=case["spl"])
+            shown = [names_in_query(p[target]) for _, p in ex]
+            rows.append({"spl": case["spl"], **score_case([list(s) for s in shown], case[target])})
+        n = len(rows) or 1
+        report[target] = {"cases": len(rows),
+                          "hit": round(sum(r["hit"] for r in rows) / n, 3),
+                          "recall": round(sum(r["recall"] for r in rows) / n, 3),
+                          "misses": [r for r in rows if r["missing"]]}
+    return report
+
+
 def evaluate(index, cases: list[dict], retrieve_fn) -> dict:
     """retrieve_fn(index, spl, target) -> Retrieved (docs with 'lang' and 'names')."""
     report = {}

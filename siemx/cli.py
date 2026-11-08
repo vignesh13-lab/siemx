@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from pathlib import Path
 
 from . import config, pipeline
 
@@ -47,9 +48,25 @@ def main():
     e.add_argument("--ablation", action="store_true",
                    help="score each retrieval option on its own (what helps, what hurts)")
 
+    g = sub.add_parser("gold", help="verified SPL -> KQL/XQL examples (gold/pairs.jsonl)")
+    gsub = g.add_subparsers(dest="gold_cmd", required=True)
+    gsub.add_parser("seed", help="(re)generate rule-verified pairs; keeps human-reviewed ones")
+    ga = gsub.add_parser("add", parents=[client],
+                         help="add a reviewed conversion: detections/spl/<file> + its output")
+    ga.add_argument("spl_file", help="path under detections/spl, e.g. windows/brute_force.spl")
+    ga.add_argument("--to", choices=["kql", "xql"], required=True)
+    ga.add_argument("--by", required=True, help="who reviewed the translation")
+    ga.add_argument("--notes", default="")
+    gs = gsub.add_parser("show", help="which examples a query would get")
+    gs.add_argument("spl")
+    gs.add_argument("--to", choices=["kql", "xql"], default="kql")
+    gsub.add_parser("check", help="do the rules still produce the rule-verified answers?")
+
     a = p.parse_args()
     if a.cmd == "docs":
         return _docs(a)
+    if a.cmd == "gold":
+        return _gold(a)
     config.set_client(a.client)
     if a.cmd == "convert":
         counts = pipeline.run(a.to.split(","), a.workers, a.force, a.path)
@@ -62,6 +79,40 @@ def main():
                   f"  method={m.get('method')}")
             for w in m.get("warnings") or []:
                 print(f"    - {w}")
+
+
+def _gold(a):
+    from . import gold
+    if a.gold_cmd == "seed":
+        pairs = gold.merge_seeds(gold.load(), gold.seed())
+        gold.save(pairs)
+        print(json.dumps({"pairs": len(pairs),
+                          "kql": sum(1 for p in pairs if p.get("kql")),
+                          "xql": sum(1 for p in pairs if p.get("xql"))}))
+    elif a.gold_cmd == "add":
+        config.set_client(a.client)
+        src = config.SRC_DIR / a.spl_file
+        out = config.OUT_DIR / a.to / Path(a.spl_file).with_suffix(config.EXT[a.to])
+        if not src.exists() or not out.exists():
+            raise SystemExit(f"need both {src} and {out} (convert first, review/edit the output)")
+        pairs = gold.load()
+        row = gold.add_reviewed(pairs, src.read_text().strip(), a.to, out.read_text().strip(),
+                                a.by, source=out.relative_to(config.ROOT).as_posix(),
+                                notes=a.notes)
+        gold.save(pairs)
+        print(json.dumps({"added": row["id"], "target": a.to, "verified_by": a.by}))
+    elif a.gold_cmd == "show":
+        for score, p in gold.similar(gold.load(), a.spl, a.to):
+            print(f"{score:.2f}  {p['id']}  ({p['verified_by']})  {p['spl']}")
+            print("      " + p[a.to].replace("\n", "\n      "))
+    elif a.gold_cmd == "check":
+        problems = gold.check(gold.load())
+        for pr in problems:
+            print(f"{pr['id']} {pr['target']}: rules now give\n{pr['now']}\n  gold:\n{pr['gold']}\n"
+                  f"  caveats: {pr['caveats']}")
+        print(json.dumps({"mismatches": len(problems)}))
+        if problems:
+            raise SystemExit(1)
 
 
 def _docs(a):
@@ -122,11 +173,23 @@ def _docs(a):
                 print(f"{label:22} {k['hit']:8.3f} {k['recall']:7.3f} {k['mrr']:6.3f} | "
                       f"{x['hit']:8.3f} {x['recall']:7.3f} {x['mrr']:6.3f}")
             return
+        from . import gold
         rep = rag_eval.evaluate(index, cases, rag.retrieve)
+        exa = rag_eval.evaluate_examples(gold.load(), cases)
         for t, r in rep.items():
-            print(f"{t.upper()}: cases={r['cases']} hit={r['hit']} recall={r['recall']} mrr={r['mrr']}")
-            for m in r["misses"] if a.verbose else []:
-                print(f"    miss {m['missing']}  <- {m['spl']}")
+            e = exa[t]
+            # combined: a name counts as covered if the docs OR the examples show it
+            doc_miss = {m["spl"]: set(m["missing"]) for m in r["misses"]}
+            ex_miss = {m["spl"]: set(m["missing"]) for m in e["misses"]}
+            both = {s: doc_miss[s] & ex_miss.get(s, set()) for s in doc_miss}
+            both = {s: m for s, m in both.items() if m}
+            n = r["cases"] or 1
+            print(f"{t.upper()}: docs      hit={r['hit']} recall={r['recall']} mrr={r['mrr']}")
+            print(f"{t.upper()}: examples  hit={e['hit']} recall={e['recall']}")
+            print(f"{t.upper()}: prompt    cases with an expected name missing from docs AND "
+                  f"examples: {len(both)}/{r['cases']} (covered {1 - len(both) / n:.3f})")
+            for s, m in both.items() if a.verbose else []:
+                print(f"    still missing {sorted(m)}  <- {s}")
     elif a.docs_cmd in ("search", "retrieve"):
         from . import retrieve as rag
         index = rag.get_index(docs.index_dir() / "chunks.jsonl")

@@ -35,9 +35,14 @@ TOP_TARGET_PER_STAGE = 3
 TOP_SPL_PER_NAME = 2
 
 _WORD = re.compile(r"[a-z0-9_]+(?:-[a-z0-9_]+)*")
-STOP = set("""a an and are as at be by can for from has have if in into is it its of on or
-that the their this to was were will with you your which when what where how not
+# English filler words. Words that are KEYWORDS in SPL/KQL/XQL (where, if, not, has,
+# filter, top, ...) must NOT be here, or BM25 cannot see them: an earlier list dropped
+# `where`, `if`, `not` and `has`, which hid the KQL where/has operators and SPL if().
+STOP = set("""a an and are as at be by can for from have in into is it its of on or
+that the their this to was were will with you your which when what how
 returns return use used using example examples query following""".split())
+CODE_KEYWORDS = {"where", "if", "not", "has", "filter", "top", "limit", "sort", "join", "in"}
+assert not STOP & CODE_KEYWORDS - {"in"}, "keywords must not be stopwords"
 
 
 def tokens(text: str) -> list[str]:

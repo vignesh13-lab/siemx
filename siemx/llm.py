@@ -18,17 +18,21 @@ SYSTEM = (
 )
 
 
+EXAMPLES_K = 3
+
+
 def retrieve(spl: str, target: str) -> dict:
-    """RAG context for the prompt: official doc chunks (retrieve.py, BM25 + name
-    lookup, filtered to SPL + the target language). Empty when the index has not
-    been built (`siemx docs fetch` + `siemx docs build`). 'examples' (gold/) comes
-    with roadmap item 4."""
-    from . import docs
+    """RAG context for the prompt:
+    docs     official doc chunks (retrieve.py: name lookup, bridge, BM25 + vectors),
+             empty when the index is not built (`siemx docs fetch` + `docs build`)
+    examples the most similar verified pairs from gold/pairs.jsonl (gold.py)"""
+    from . import docs, gold
     from . import retrieve as rag
+    examples = gold.examples_for_prompt(spl, target, k=EXAMPLES_K)
     index = rag.get_index(docs.index_dir() / "chunks.jsonl")
     if index is None:
-        return {"docs": [], "examples": []}
-    return {"docs": rag.retrieve(index, spl, target).docs, "examples": []}
+        return {"docs": [], "examples": examples}
+    return {"docs": rag.retrieve(index, spl, target).docs, "examples": examples}
 
 
 def build_prompt(spl: str, target: str) -> str:
@@ -37,9 +41,11 @@ def build_prompt(spl: str, target: str) -> str:
         f"Translate this SPL to {NAMES[target]}.\n\nSPL:\n{spl}\n\n"
         f"Reference docs (official documentation excerpts; each has its source URL):\n"
         f"{json.dumps(ctx['docs'], ensure_ascii=False)}\n\n"
-        f"Verified examples:\n{json.dumps(ctx['examples'])}\n\n"
-        "Use only syntax shown in the reference docs. If something you need is not "
-        "covered by them, add a warning instead of guessing.\n"
+        "Verified examples (similar SPL already translated and checked; they show SYNTAX - "
+        "their table and field names are illustrative, do not copy them):\n"
+        f"{json.dumps(ctx['examples'], ensure_ascii=False)}\n\n"
+        "Use only syntax shown in the reference docs or the verified examples. If something "
+        "you need is not covered by them, add a warning instead of guessing.\n"
         'Return JSON: {"query": str, "confidence": 0-1, "warnings": [str], '
         '"unsupported": bool, "sources": [the URLs of the docs you relied on]}'
     )

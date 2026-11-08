@@ -38,7 +38,11 @@ siemx/rules.py                  stage rules; every rule's doc links are listed a
 siemx/search.py                 SPL base-search semantics -> where / filter
 siemx/expr.py                   SPL eval/where expressions -> KQL / XQL
 siemx/schema.py                 field, order and uniqueness checks over rule outputs
-gold/                           (to build) human-verified translation pairs
+gold/pairs.jsonl                verified SPL -> KQL/XQL pairs (siemx/gold.py): few-shot examples
+                                in the LLM prompt. verified_by "docs+tests" = rule output with no
+                                caveat (siemx gold seed); a person's name = human-reviewed
+                                (siemx gold add <file> --to kql --by <name>). siemx gold check
+                                (and tests) fail if the rules no longer give a gold answer.
 rag/sources.json                RAG corpus: ~1,009 official doc URLs (SPL 9.4, KQL, XQL). Committed.
 rag/raw/, rag/index/            downloaded pages / chunks.jsonl + bridge.json. Git-ignored
                                 (Splunk/Palo Alto docs are copyrighted; rebuild with siemx docs ...)
@@ -97,7 +101,13 @@ pytest -q
    best-per-name keeps KQL at 0.63 and lifts XQL hit 0.50 -> 0.75 (no official XQL bridge).
    Default mode = hybrid; falls back to BM25 when Chroma / the vector index is missing.
    Do not build a bridge from the eval labels (evaluation leakage).
-4. gold/ format (JSONL: spl, kql, xql, notes, verified_by) and loader; feed nearest examples into the prompt.
+4. DONE gold/pairs.jsonl + loader; the 3 most similar pairs (shared SPL commands/functions)
+   go into the prompt; examples are SYNTAX, field names illustrative (said in the prompt).
+   Seeds only include caveat-free rule output. Measured (siemx docs eval): docs + examples
+   cover 83% of KQL / 92% of XQL eval cases (docs alone: 63% / 75% hit). Remaining gaps
+   (dc, concat/strcat, lookup, join, strftime) need human-reviewed pairs, not guesses.
+   Evaluation excludes the exact query from its own examples (leakage guard).
+   Never put SPL/KQL/XQL keywords (where, if, not, has...) in the BM25 stopword list.
 5. validate.py: real validation (KQL parser or dry-run; XQL dry-run if API available); feed errors into the retry loop.
 6. Field mapping: mappings/field_map.json (CIM <-> ASIM <-> XDM) applied to field names in
    outputs (mappings/fields.json already lists the known target columns for the check).
