@@ -99,9 +99,28 @@ def test_set_client_output_folder_and_validation(monkeypatch):
     assert config.OUT_DIR == config.ROOT / "converted" / "acme"
     assert config.META_DIR == config.OUT_DIR / "_meta"
     assert config.client_dir() == config.MAPPINGS_DIR / "clients" / "acme"
-    for bad in ("../x", "a b", "a/b", ""):
+    for bad in ("../x", "a b", "a/b"):
         with pytest.raises(ValueError):
             config.set_client(bad)
+
+
+def test_empty_client_name_means_no_client(monkeypatch):
+    """GitHub Actions passes SIEMX_CLIENT="" on push events; that must not crash."""
+    monkeypatch.setattr(config, "CLIENT", None)
+    monkeypatch.setattr(config, "OUT_DIR", config.OUT_DIR)
+    before = config.OUT_DIR
+    config.set_client("")
+    assert config.CLIENT is None and config.OUT_DIR == before
+
+
+def test_cli_convert_with_empty_client_env_like_ci_push(maps, no_llm, monkeypatch, capsys):
+    """Reproduces the convert-detections workflow on a push to main."""
+    spl_file("w/a.spl")
+    monkeypatch.setenv("SIEMX_CLIENT", "")
+    monkeypatch.setattr("sys.argv", ["siemx", "convert", "--to", "kql", "--workers", "1"])
+    cli.main()
+    assert '"summary"' in capsys.readouterr().out
+    assert config.CLIENT is None
 
 
 # ---- macros ----------------------------------------------------------------------------------
