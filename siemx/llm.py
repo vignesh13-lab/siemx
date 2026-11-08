@@ -75,6 +75,14 @@ def build_prompt(spl: str, target: str, source: str = "spl", base: str | None = 
     )
 
 
+REVERSE_PITFALLS = {
+    "kql": "KQL sort is descending by default;",
+    "xql": ("XQL string comparison is case-insensitive unless `config case_sensitive = true` "
+            "while SPL where/eval comparison is case-sensitive; in XQL \"...\" strings * is a "
+            "wildcard; XQL `config timeframe` is the time range (M = minutes);"),
+}
+
+
 def build_reverse_prompt(text: str, target: str, source: str, base: str | None) -> str:
     """KQL -> SPL. The SPL base search comes from mappings/sources.json, so the model
     never has to invent an index or sourcetype."""
@@ -90,7 +98,7 @@ def build_reverse_prompt(text: str, target: str, source: str, base: str | None) 
         "their table and field names are illustrative, do not copy them):\n"
         f"{json.dumps(ctx['examples'], ensure_ascii=False)}\n\n"
         "Use only syntax shown in the reference docs or the verified examples. Mind the "
-        "differences: KQL sort is descending by default; SPL sort keeps 10,000 rows unless "
+        f"differences: {REVERSE_PITFALLS[source]} SPL sort keeps 10,000 rows unless "
         "`sort 0`; SPL stats drops events whose by-field is missing. If something has no "
         "faithful SPL equivalent, add a warning instead of guessing.\n"
         'Return JSON: {"query": str, "confidence": 0-1, "warnings": [str], '

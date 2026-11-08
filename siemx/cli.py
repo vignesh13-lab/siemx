@@ -22,7 +22,7 @@ def main():
     c.add_argument("--workers", type=int, default=4)
     c.add_argument("--force", action="store_true")
     c.add_argument("--path", help="only convert detections/spl/<path>/** (e.g. a client folder)")
-    c.add_argument("--from", dest="source", choices=["spl", "kql"], default="spl",
+    c.add_argument("--from", dest="source", choices=["spl", "kql", "xql"], default="spl",
                    help="input language: spl (detections/spl -> kql/xql) or kql "
                         "(detections/kql -> spl)")
 
@@ -137,7 +137,7 @@ def main():
         return _gold(a)
     config.set_client(a.client)
     if a.cmd == "convert":
-        targets = ["spl"] if a.source == "kql" else a.to.split(",")
+        targets = ["spl"] if a.source in ("kql", "xql") else a.to.split(",")
         counts = pipeline.run(targets, a.workers, a.force, a.path, a.source)
         print(json.dumps({"summary": counts}))
     elif a.cmd == "status":
@@ -248,20 +248,29 @@ def _docs(a):
             raise SystemExit("no index: run `siemx docs fetch` and `siemx docs build` first")
         if a.reverse:
             from . import gold
-            rcases = rag_eval.reverse_cases(gold.load())
-            print(f"{'configuration':22} {'SPL hit':>8} {'recall':>7} {'mrr':>6}  ({len(rcases)} cases)")
             configs = [("bm25, no bridge", rag.Options(use_bridge=False, mode="bm25")),
                        ("bm25 + bridge", rag.Options(mode="bm25"))]
             if index.vec is not None:
                 configs.append(("hybrid (default)", rag.Options()))
-            rep = None
-            for label, opts in configs:
-                rep = rag_eval.evaluate_reverse(
-                    index, rcases, lambda i, q, t, source, o=opts: rag.retrieve(i, q, t, opts=o, source=source))
-                print(f"{label:22} {rep['hit']:8.3f} {rep['recall']:7.3f} {rep['mrr']:6.3f}")
-            if a.verbose and rep:
-                for m in rep["misses"]:
-                    print(f"  miss {m['missing']}: {m['kql'][:90]!r}")
+            for src in ("kql", "xql"):
+                rcases = rag_eval.reverse_cases(gold.load(), src)
+                print(f"{src.upper()} -> SPL  {'configuration':22} {'hit':>6} {'recall':>7} "
+                      f"{'mrr':>6}  ({len(rcases)} cases)")
+                rep = None
+                for label, opts in configs:
+                    rep = rag_eval.evaluate_reverse(
+                        index, rcases,
+                        lambda i, q, t, source, o=opts: rag.retrieve(i, q, t, opts=o, source=source),
+                        source=src)
+                    print(f"            {label:22} {rep['hit']:6.3f} {rep['recall']:7.3f} {rep['mrr']:6.3f}")
+                cov = rag_eval.reverse_prompt_coverage(
+                    index, gold.load(), src, lambda i, q, t, source: rag.retrieve(i, q, t, source=source))
+                print(f"            examples (own pair excluded): hit={cov['examples_hit']} "
+                      f"recall={cov['examples_recall']}; prompt shows every expected SPL "
+                      f"command (docs OR examples): {cov['covered']}")
+                if a.verbose and rep:
+                    for m in rep["misses"]:
+                        print(f"  miss {m['missing']}: {m['query'][:90]!r}")
             return
         cases = rag_eval.load_cases(docs.rag_dir() / "eval.jsonl")
         if a.ablation:

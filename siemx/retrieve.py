@@ -171,6 +171,18 @@ def kql_names(stage: str) -> list[str]:
     return names
 
 
+def xql_names(stage: str) -> list[str]:
+    """XQL stage name plus function names: 'alter n = len(x)' -> ['alter', 'len']."""
+    m = re.match(r"\s*([A-Za-z_]+)", stage)
+    if not m:
+        return []
+    names = [m.group(1).lower()]
+    for f in _FUNC.findall(stage.lower()):
+        if f not in names:
+            names.append(f)
+    return names
+
+
 def invert_bridge(bridge: dict[str, list[str]]) -> dict[str, list[str]]:
     """{'stats': ['summarize']} -> {'summarize': ['stats']} (for KQL -> SPL)."""
     out: dict[str, list[str]] = {}
@@ -196,6 +208,14 @@ def retrieve(index: BM25Index, spl: str, target: str, budget: int = BUDGET_CHARS
         stages = split_pipes(spl)
         bridge = invert_bridge(index.bridge.get("kql", {})) if opts.use_bridge else {}
         names_of = kql_names
+    elif source == "xql":
+        from .reverse import split_pipes
+        body = split_pipes(spl)
+        while body and xql_names(body[0])[:1] in (["config"], ["dataset"]):
+            body = body[1:]
+        stages = ["<config/dataset>"] + body      # index 0 = the head, skipped like a base search
+        bridge = {}                               # no usable official XQL bridge (see below)
+        names_of = xql_names
     else:
         stages = split_stages(spl)
         bridge = index.bridge.get(target, {}) if opts.use_bridge else {}
