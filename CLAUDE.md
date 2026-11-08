@@ -75,7 +75,6 @@ pytest -q
 9. Pilot: run 50 real SPLs, measure accuracy per command, tune confidence thresholds.
 
 ## Open questions (need a human with access)
-- Does SPL stats/top drop events whose by-field is missing? (test with makeresults)
 - XQL: field list for xdr_data; `count` as an alias; whether `fields - x` keeps all other fields.
 
 ## Definition of done for any task
