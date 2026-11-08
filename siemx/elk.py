@@ -523,10 +523,12 @@ def _filter(base: str, extra: list[tuple[str, str]]):
     matched = rules.match_source(meta, "elk") if meta else None
     if matched:
         index, dropped, by = matched
+        warnings += rules.placeholder_warnings(meta, index, "elk")
         if dropped:
             warnings.append(rules.INDEX_DROPPED_WARNING.format(T="ELK", index=dropped, by=by))
-    elif meta:
-        warnings.append(W_NO_INDEX.format(meta=" ".join(f"{k}={v}" for k, v in meta.items())))
+    elif meta:                             # the query needs no index: placeholder in the meta
+        index = rules.placeholder_for(meta, "elk", base)
+        warnings += rules.placeholder_warnings(meta, index, "elk")
     else:
         warnings.append(W_NO_SOURCE)
     ast = nodes[0] if len(nodes) == 1 else ("and", nodes)

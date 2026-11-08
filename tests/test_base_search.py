@@ -92,8 +92,6 @@ def test_backslash_value_flagged(env):
 
 @pytest.mark.parametrize("spl", [
     "EventID=4625",                                   # no index: unknown table
-    "index=main EventID=4625",                        # mapping key needs sourcetype too
-    W + "sourcetype=other",                           # metadata not in the mapping
     W + "mimikatz",                                   # free text searches _raw
     W + '"failed password"',
     W + "earliest=-24h EventID=4625",                 # time modifiers
@@ -107,11 +105,22 @@ def test_backslash_value_flagged(env):
     W + 'Account="unclosed',
     W + "Account IN ()",
     "index=wineventlog index=other",
-    "index=wine*",
 ])
 def test_base_search_unsupported(env, spl):
     assert rules.first_stage(spl, "kql") is None
     assert rules.first_stage(spl, "xql") is None
+
+
+@pytest.mark.parametrize("spl, name", [
+    ("index=main EventID=4625", "EDIT_ME_main"),          # mapping key needs sourcetype too
+    (W + "sourcetype=other EventID=4625", "EDIT_ME_other"),  # metadata not in the mapping
+    ("index=wine* EventID=4625", "EDIT_ME_wine"),
+])
+def test_unmapped_source_gets_an_editable_placeholder(env, spl, name):
+    k, x = rules.first_stage(spl, "kql"), rules.first_stage(spl, "xql")
+    assert k == f"{name}\n| where EventID == 4625"
+    assert x == f"dataset = {name}\n| filter EventID = 4625"
+    assert "uses the placeholder " + name in k.warnings[0]
 
 
 def test_numeric_comparison_on_string_column(env):

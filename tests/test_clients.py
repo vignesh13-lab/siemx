@@ -52,9 +52,9 @@ def test_sourcetype_only(maps):
     assert (r, r.warnings) == ("SecurityEvent\n| where EventID == 1", [])
 
 
-def test_unmapped_sourcetype_is_none(maps):
-    assert rules.first_stage("index=wineventlog sourcetype=other", "kql") is None
-    assert rules.first_stage("sourcetype=other", "kql") is None
+def test_unmapped_sourcetype_gets_a_placeholder(maps):
+    assert rules.first_stage("index=wineventlog sourcetype=Other", "kql") == "EDIT_ME_Other"
+    assert rules.first_stage("sourcetype=other", "kql") == "EDIT_ME_other"
 
 
 def test_most_specific_entry_wins(maps):
@@ -77,7 +77,7 @@ def test_index_wildcard_only_for_index(maps):
 def test_client_index_mapping_overrides_and_is_exact(maps, monkeypatch):
     write(maps / "clients" / "acme" / "sources.json",
           {"index=acme_win": {"kql": "SecurityEvent", "xql": "dataset = xdr_data"}})
-    assert rules.first_stage("index=acme_win EventID=1", "kql") is None      # no client yet
+    assert rules.first_stage("index=acme_win EventID=1", "kql").startswith("EDIT_ME_acme_win")
     use_client(monkeypatch, "acme")
     r = rules.first_stage("index=acme_win EventID=1", "kql")
     assert (r, r.warnings) == ("SecurityEvent\n| where EventID == 1", [])

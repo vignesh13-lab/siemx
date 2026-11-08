@@ -110,7 +110,7 @@ Tested result:
 | `index=clienta_win sourcetype=XmlWinEventLog:Security ...` | `SecurityEvent`, with a warning that the index was dropped |
 | `index=clientb_sec sourcetype=XmlWinEventLog:Security ...` | `SecurityEvent` (same) |
 | `sourcetype=XmlWinEventLog:Security ...` | `SecurityEvent` |
-| `index=something ...` (index only, no sourcetype) | no rule; sent to the AI, which has to guess, so it is reviewed |
+| `sourcetype=wineventlog ...` (not mapped) | `EDIT_ME_wineventlog` placeholder table, needs-review (below) |
 
 Shared macros work the same way. If detections start with `` `win_security` ``, define it
 once for everyone in `mappings/macros.json`:
@@ -121,6 +121,26 @@ once for everyone in `mappings/macros.json`:
 
 Per-client folders (`mappings/clients/<client>/`) are **optional**. Use them only when a
 client really differs (for example, a client whose index holds only part of the data).
+
+**Sources that are not mapped yet** still convert. The table becomes an editable
+placeholder that keeps the Splunk name, and the result is needs-review:
+
+```
+SPL:  index=* sourcetype=wineventlog EventCode=4688 ...
+KQL:  EDIT_ME_wineventlog | where EventCode == 4688 ...
+XQL:  dataset = EDIT_ME_wineventlog | filter EventCode = 4688 ...
+```
+
+Replace the placeholder in the output, or once for all detections:
+
+```powershell
+siemx mappings missing            # which Splunk sources are not mapped, and where they are used
+siemx mappings missing --write    # add them to mappings/sources.json as EDIT_ME_ entries
+```
+
+Then edit `EDIT_ME_...` in `mappings/sources.json` to the real table / dataset / index
+pattern and run `siemx convert` again: every detection using it is converted again.
+`mappings/SOURCES.md` lists the mappings that are already researched.
 
 ## 5. Convert your detections
 

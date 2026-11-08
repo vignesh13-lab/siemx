@@ -211,6 +211,12 @@ pytest -q
    matching, isnotempty vs `f: *` and "", XQL not/null handling. XQL needs plain field
    names: an unmapped dotted ECS name -> unsupported (map it). Field names chain through
    field_map.json (Elastic -> Splunk via exact "elk" entries -> target).
+13. DONE Windows Security mappings from the docs (mappings/SOURCES.md) and editable
+   placeholders: an unmapped Splunk source no longer goes to the LLM for the base search;
+   rules.first_stage uses EDIT_ME_<Splunk name as written> (kql / xql only; elk keeps it as
+   the meta index) and flags it. The LLM prompt names the placeholder when later stages need
+   the model. `siemx mappings missing [--write]` lists / adds EDIT_ME_ entries; any
+   EDIT_ME_ value in sources.json stays flagged until replaced. CONVERTER_VERSION 22.
 
 ## Open questions (need a human with access)
 - Elastic: index patterns per sourcetype and the ECS field names in use (field_map.json "elk").

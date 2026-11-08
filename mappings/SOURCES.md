@@ -16,8 +16,9 @@ or the vendor's own code listed here (checked 2026-11-08). Shared entries are ne
 
 **Not mapped on purpose:** `sourcetype=WinEventLog` or `XmlWinEventLog` without a `source`.
 Those sourcetypes hold every classic/XML channel (Security, System, PowerShell, ...), so the
-table depends on the channel. Add `source=...:Security` to the detection, or map a
-client-specific source.
+table depends on the channel. Detections that use them get an `EDIT_ME_wineventlog`
+placeholder table: set it once in `sources.json` (`siemx mappings missing --write` adds the
+entry), or add `source=...:Security` to the detection.
 
 ## Field names
 

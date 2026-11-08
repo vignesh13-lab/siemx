@@ -126,10 +126,23 @@ def build_prompt(spl: str, target: str, source: str = "spl", base: str | None = 
         f"{json.dumps(ctx.get('field_map', {}), ensure_ascii=False)}\n\n"
         "Use only syntax shown in the reference docs or the verified examples. If something "
         "you need is not covered by them, add a warning instead of guessing.\n"
-        f"{FORWARD_PITFALLS.get(target, '')}"
+        f"{FORWARD_PITFALLS.get(target, '')}{_placeholder_line(spl, target)}"
         'Return JSON: {"query": str, "confidence": 0-1, "warnings": [str], '
         '"unsupported": bool, "sources": [the URLs of the docs you relied on]}'
     )
+
+
+def _placeholder_line(spl: str, target: str) -> str:
+    """Unmapped Splunk source: the model must use the editable placeholder, not invent a
+    table. Empty for mapped sources, so their prompts (and cached answers) do not change."""
+    from . import rules
+    if target not in ("kql", "xql"):
+        return ""
+    unmapped = rules.unmapped_source(spl, target)
+    if not unmapped:
+        return ""
+    return (f"The Splunk source is not mapped: start the query with exactly `{unmapped[0]}` "
+            "(a placeholder the analyst replaces); do not choose a table yourself.\n")
 
 
 # Target-specific facts for the forward prompt. KQL has none, so its prompt text (and its
