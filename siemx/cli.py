@@ -19,15 +19,16 @@ def main():
 
     c = sub.add_parser("convert", parents=[client],
                        help="convert detections/spl/** (skips unchanged files)")
-    c.add_argument("--to", default="kql,xql")
+    c.add_argument("--to", help="targets, comma-separated. From spl: kql, xql, elk (default "
+                                "kql,xql). From kql or xql: spl (default) or elk. From elk: spl")
     c.add_argument("--workers", type=int, default=None,
                    help="parallel conversions (default 4; 1 with ollama, which runs one request at a time)")
     c.add_argument("--force", action="store_true")
     c.add_argument("--path", help="only convert detections/spl/<path>/** (e.g. a client folder)")
     c.add_argument("--from", dest="source", choices=["spl", "kql", "xql", "elk"],
                    default="spl",
-                   help="input language: spl (detections/spl -> the --to targets) or kql / "
-                        "xql / elk (detections/<lang> -> spl). elk = Kibana KQL (Elastic)")
+                   help="input language (reads detections/<lang>); elk = Kibana KQL "
+                        "(Elastic)")
 
     sub.add_parser("status", parents=[client], help="counts per status")
     sub.add_parser("review", parents=[client], help="list needs-review / unsupported")
@@ -144,10 +145,13 @@ def main():
         if not llm.configured():
             print(f"note: {llm.NO_MODEL}. Queries that need the AI will be marked "
                   "unsupported and retried on the next run.", file=sys.stderr)
-        targets = ["spl"] if a.source != "spl" else a.to.split(",")
-        bad = [t for t in targets if t not in ("kql", "xql", "elk")] if a.source == "spl" else []
+        allowed = {"spl": ("kql", "xql", "elk"), "kql": ("spl", "elk"),
+                   "xql": ("spl", "elk"), "elk": ("spl",)}[a.source]
+        targets = (a.to or ("kql,xql" if a.source == "spl" else "spl")).split(",")
+        bad = [t for t in targets if t not in allowed]
         if bad:
-            p.error(f"--to: unknown target {', '.join(bad)} (use kql, xql, elk)")
+            p.error(f"--to from {a.source}: unknown target {', '.join(bad)} "
+                    f"(use {', '.join(allowed)})")
         workers = a.workers or llm.default_workers()
         counts = pipeline.run(targets, workers, a.force, a.path, a.source)
         print(json.dumps({"summary": counts}))

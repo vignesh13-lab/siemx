@@ -50,7 +50,10 @@ CATEGORIES = [
     ("ELK: no index pattern mapped", r"^ELK: (no index pattern|the SPL names no index)"),
     ("ELK: columns dropped (table/fields/sort)", r"^ELK: .* dropped: they choose or order"),
     ("ELK/SPL: case and whole-value matching", r"case-sensitively"),
-    ("field names not mapped (ELK)", r"field names kept from (Splunk|Elastic)"),
+    ("field names not mapped (ELK)", r"field names kept from (Splunk|Elastic|KQL|XQL)"),
+    ("ELK: text vs keyword fields", r"^ELK: on text fields"),
+    ("ELK: time range moved to the rule", r"^ELK: time range .* dropped"),
+    ("ELK: empty string / missing field", r"also matches (an empty string|events without)"),
     ("SPL: no index pattern header", r"names no index pattern"),
     ("other rule caveat", r"."),
 ]

@@ -106,6 +106,8 @@ def field_hints(spl: str, target: str) -> dict:
 
 
 def build_prompt(spl: str, target: str, source: str = "spl", base: str | None = None) -> str:
+    if source != "spl" and target == "elk":
+        return build_to_elk_prompt(spl, source)
     if source != "spl":
         return build_reverse_prompt(spl, target, source, base)
     ctx = retrieve(spl, target)
@@ -150,6 +152,35 @@ REVERSE_PITFALLS = {
             "while SPL where/eval comparison is case-sensitive; in XQL \"...\" strings * is a "
             "wildcard; XQL `config timeframe` is the time range (M = minutes);"),
 }
+
+
+TO_ELK_PITFALLS = {
+    "kql": ("KQL == != in are case-sensitive; =~ !~ in~ contains startswith endswith has are "
+            "case-insensitive; Kibana KQL keyword fields are case-sensitive, so add a warning "
+            "for every case-insensitive comparison."),
+    "xql": ("XQL string comparison is case-insensitive unless `config case_sensitive = true` and "
+            "* inside XQL \"...\" is a wildcard; Kibana KQL keyword fields are case-sensitive, "
+            "so add a warning for every case-insensitive comparison."),
+}
+
+
+def build_to_elk_prompt(text: str, source: str) -> str:
+    """KQL / XQL -> Kibana KQL: only the event filter; transforming stages never reach the
+    model (to_elk.py marks them unsupported first)."""
+    ctx = retrieve(text, "elk", source=source)
+    return (
+        f"Translate the event filter of this {NAMES[source]} query to {NAMES['elk']}.\n\n"
+        f"{source.upper()}:\n{text}\n\n"
+        "Return one Kibana KQL filter: no table or index, no pipes. Keep the column names as "
+        "they are (they are mapped separately). Drop time ranges (they belong to the Elastic "
+        "rule) and add a warning saying so.\n\n"
+        f"Reference docs (each has its source URL):\n{json.dumps(ctx['docs'], ensure_ascii=False)}"
+        "\n\nUse only syntax shown in the reference. "
+        f"{TO_ELK_PITFALLS[source]} If something has no faithful Kibana KQL equivalent, answer "
+        "unsupported instead of guessing.\n"
+        'Return JSON: {"query": str, "confidence": 0-1, "warnings": [str], '
+        '"unsupported": bool, "sources": [the URLs of the docs you relied on]}'
+    )
 
 
 def build_reverse_prompt(text: str, target: str, source: str, base: str | None) -> str:
