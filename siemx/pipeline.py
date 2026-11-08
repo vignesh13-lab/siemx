@@ -35,6 +35,17 @@ def rule_parts(spl: str, target: str) -> list | None:
     return [head] + rest
 
 
+def missing_rules(spl: str, target: str) -> list[str]:
+    """SPL commands whose stage has no rule ('search' = the base search). For reports:
+    which rules would convert the most detections."""
+    stages = triage.split_stages(spl)
+    out = [] if rules.first_stage(stages[0], target) is not None else ["search"]
+    for s in stages[1:]:
+        if rules.stage(s, target) is None:
+            out.append(triage.command_of(s) or "?")
+    return out
+
+
 def apply_field_map(spl: str, parts: list, target: str) -> tuple[str, list, list[str], dict]:
     """Rename source fields the table does not have, using mappings/field_map.json.
     -> (spl, parts, warnings, applied). Unchanged when nothing applies."""
@@ -66,6 +77,7 @@ def convert_query(spl: str, target: str) -> dict:
         return {"query": q, "confidence": 0.9, "method": "rules", "warnings": warnings,
                 "tokens": 0, "validator": validate.status()[target], "field_map": applied}
     # 2) LLM + RAG fallback; the validator's exact errors go back to the model
+    no_rule = missing_rules(spl, target)
     out = llm.translate(spl, target)
     out["method"] = "llm"
     for _ in range(MAX_RETRIES):
@@ -77,6 +89,7 @@ def convert_query(spl: str, target: str) -> dict:
     out.setdefault("warnings", []).extend(
         f"validation: {p}" for p in validate.check(out.get("query", ""), target))
     out["validator"] = validate.status()[target]
+    out["no_rule"] = no_rule
     return out
 
 
@@ -149,9 +162,9 @@ def process_file(path, targets, force, map_hash=None):
                 "complexity": triage.complexity(spl),
                 "model": llm.MODEL if res.get("method", "").startswith("llm") else None,
                 "cached": bool(res.get("cached")),
-                "ts": int(time.time()),
+                "ts": int(time.time()), "query_sha": sha(res.get("query", "")),
                 **{k: res.get(k) for k in ("confidence", "method", "warnings", "tokens",
-                                           "validator", "field_map")}}
+                                           "validator", "field_map", "no_rule")}}
         meta_path.write_text(json.dumps(meta, indent=2))
         results.append({"file": shown, "target": t, "status": st})
     return results

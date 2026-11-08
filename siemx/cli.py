@@ -62,6 +62,21 @@ def main():
     gs.add_argument("--to", choices=["kql", "xql"], default="kql")
     gsub.add_parser("check", help="do the rules still produce the rule-verified answers?")
 
+    rp = sub.add_parser("report", parents=[client],
+                        help="report.md + summary.csv in converted/<client>/_report/")
+    rp.add_argument("--mkdocs", help="also write a SIEM Hub docs page into this folder")
+    vd = sub.add_parser("verdict", parents=[client], help="record a review result (pilot)")
+    vd.add_argument("spl_file", help="path under detections/spl, e.g. windows/brute_force.spl")
+    vd.add_argument("--to", choices=["kql", "xql"], required=True)
+    vd.add_argument("--result", choices=["correct", "fixed", "wrong"], required=True)
+    vd.add_argument("--by", required=True, help="who reviewed it")
+    vd.add_argument("--notes", default="")
+
+    ps = sub.add_parser("pilot-sample", help="stratified sample of detections for the pilot")
+    ps.add_argument("folder", help="folder with .spl files (e.g. a full export)")
+    ps.add_argument("-n", type=int, default=50)
+    ps.add_argument("--seed", type=int, default=7)
+
     fl = sub.add_parser("fields", help="field mapping (mappings/field_map.json)")
     fsub = fl.add_subparsers(dest="fields_cmd", required=True)
     fi = fsub.add_parser("import-props",
@@ -80,6 +95,27 @@ def main():
     v.add_argument("--to", choices=["kql", "xql"], default="kql")
 
     a = p.parse_args()
+    if a.cmd == "pilot-sample":
+        from . import report
+        root = Path(a.folder)
+        for f in report.pilot_sample(root, a.n, a.seed):
+            print(f.relative_to(root).as_posix())
+        return
+    if a.cmd in ("report", "verdict"):
+        from . import report
+        config.set_client(a.client)
+        if a.cmd == "report":
+            print(json.dumps(report.write(Path(a.mkdocs) if a.mkdocs else None)))
+            return
+        meta_path = pipeline.meta_path_for(config.SRC_DIR / a.spl_file, a.to)
+        if not meta_path.exists():
+            raise SystemExit(f"no conversion found for {a.spl_file} ({a.to}): run siemx convert")
+        row = report.add_review(json.loads(meta_path.read_text()), a.result, a.by, a.notes)
+        print(json.dumps(row))
+        if a.result == "fixed":
+            print(f"tip: once the fixed query is in converted/, `siemx gold add {a.spl_file} "
+                  f"--to {a.to} --by {a.by}` makes it a verified example")
+        return
     if a.cmd == "fields":
         return _fields(a)
     if a.cmd == "validate":

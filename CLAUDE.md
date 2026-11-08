@@ -130,8 +130,14 @@ pytest -q
    (schema.field_reads), so the SPL identifier rename is safe. The LLM prompt gets the
    matching entries. XQL / XDM entries: TODO (needs the xdr_data field list).
 7. Reverse direction: KQL/XQL -> SPL (parsers for KQL and XQL into the same stage/IR form).
-8. Reporting: `siemx report` writing a markdown/CSV summary per source type; hook into the MkDocs catalog.
-9. Pilot: run 50 real SPLs, measure accuracy per command, tune confidence thresholds.
+8. DONE siemx report (siemx/report.py): converted/<client>/_report/report.md + summary.csv
+   (summary per source, warning categories, SPL commands without rules, review accuracy by
+   status/method/target/command, LLM auto-approval threshold analysis), --mkdocs writes a
+   SIEM Hub page (type: doc).
+9. TOOLING DONE, pilot pending (needs real detections in a private repo): PILOT.md runbook;
+   siemx pilot-sample (stratified by source type x complexity); siemx verdict
+   (correct|fixed|wrong, append-only converted/<client>/_reviews.jsonl, stale when the
+   judged query changes). Thresholds change only in a reviewed PR, based on the report.
 
 ## Open questions (need a human with access)
 - XQL: field list for xdr_data; `count` as an alias; whether `fields - x` keeps all other fields.
