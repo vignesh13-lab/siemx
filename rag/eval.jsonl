@@ -1,0 +1,24 @@
+{"spl": "index=x | stats count by host", "kql": ["summarize", "count"], "xql": ["comp", "count"]}
+{"spl": "index=x | stats dc(user) as n by host", "kql": ["count_distinctif", "count_distinct"], "xql": ["count_distinct"]}
+{"spl": "index=x | stats sum(bytes) as total by host", "kql": ["sumif", "sum"], "xql": ["sum"]}
+{"spl": "index=x | stats max(t) as last by host", "kql": ["maxif", "max"], "xql": ["max"]}
+{"spl": "index=x | dedup host", "kql": ["arg_max"], "xql": ["dedup"]}
+{"spl": "index=x | rex field=cmd \"user=(?<user>\\w+)\"", "kql": ["extract"], "xql": ["regextract"]}
+{"spl": "index=x | timechart span=1h count", "kql": ["bin"], "xql": ["bin"]}
+{"spl": "index=x | top 5 user", "kql": ["top"], "xql": ["sort", "limit"]}
+{"spl": "index=x | rename src AS source_ip", "kql": ["project-rename"], "xql": ["alter"]}
+{"spl": "index=x | eval u = lower(user)", "kql": ["tolower"], "xql": ["lowercase"]}
+{"spl": "index=x | eval u = upper(user)", "kql": ["toupper"], "xql": ["uppercase"]}
+{"spl": "index=x | eval n = len(cmd)", "kql": ["strlen"], "xql": ["len"]}
+{"spl": "index=x | eval s = if(code == 200, \"ok\", \"error\")", "kql": ["iff"], "xql": ["if"]}
+{"spl": "index=x | eval ip = coalesce(src, dst)", "kql": ["coalesce"], "xql": ["coalesce"]}
+{"spl": "index=x | eval who = user . \"@\" . host", "kql": ["strcat"], "xql": ["concat"]}
+{"spl": "index=x | eval r = round(avg, 2)", "kql": ["round"], "xql": ["round"]}
+{"spl": "index=x | where count > 5", "kql": ["where"], "xql": ["filter"]}
+{"spl": "index=x | head 10", "kql": ["take"], "xql": ["limit"]}
+{"spl": "index=x | sort - count", "kql": ["sort"], "xql": ["sort"]}
+{"spl": "index=x | table host, user", "kql": ["project"], "xql": ["fields"]}
+{"spl": "index=x | fields - raw", "kql": ["project-away"], "xql": ["fields"]}
+{"spl": "index=x | lookup assets ip OUTPUT owner", "kql": ["lookup"], "xql": ["join"]}
+{"spl": "index=x | join type=left host [search index=y | stats count by host]", "kql": ["join"], "xql": ["join"]}
+{"spl": "index=x | eval t = strftime(_time, \"%Y-%m-%d\")", "kql": ["format_datetime"], "xql": ["format_timestamp"]}
