@@ -48,3 +48,10 @@ def test_command_of(stage, cmd):
 ])
 def test_complexity(spl, level):
     assert complexity(spl) == level
+
+
+def test_split_stages_respects_escaped_quotes():
+    """SPL: \\" is a quote inside a string; a | after it is still inside the string."""
+    q = 'index=a | eval x="a\\"b|c" | makemv tokenizer="([\\"\|<>])" y | stats count'
+    assert split_stages(q) == ['index=a', 'eval x="a\\"b|c"',
+                                      'makemv tokenizer="([\\"\|<>])" y', 'stats count']
