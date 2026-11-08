@@ -62,7 +62,19 @@ def main():
     gs.add_argument("--to", choices=["kql", "xql"], default="kql")
     gsub.add_parser("check", help="do the rules still produce the rule-verified answers?")
 
+    v = sub.add_parser("validate", help="check a KQL/XQL query (official KQL parser, XQL names)")
+    v.add_argument("query", nargs="?", help="the query (omit to only show which validators run)")
+    v.add_argument("--to", choices=["kql", "xql"], default="kql")
+
     a = p.parse_args()
+    if a.cmd == "validate":
+        from . import validate
+        print(json.dumps(validate.status()))
+        if a.query:
+            problems = validate.check(a.query, a.to)
+            print("\n".join(problems) if problems else "no problems found")
+            raise SystemExit(1 if problems else 0)
+        return
     if a.cmd == "docs":
         return _docs(a)
     if a.cmd == "gold":

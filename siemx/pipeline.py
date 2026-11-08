@@ -38,18 +38,33 @@ def convert_query(spl: str, target: str) -> dict:
         warnings = [w for part in parts for w in getattr(part, "warnings", [])]
         warnings += schema.check(parts, target)        # unknown field names -> review
         warnings += schema.order_check(parts, target)  # order-dependent stages -> review
-        return {"query": q, "confidence": 0.9, "method": "rules", "warnings": warnings, "tokens": 0}
-    # 2) LLM + RAG fallback with validation retry
+        # safety net for bugs in our own rules (column errors are left to schema.check)
+        warnings += [f"validation: {p}" for p in validate.check(q, target, scope="rules")]
+        return {"query": q, "confidence": 0.9, "method": "rules", "warnings": warnings,
+                "tokens": 0, "validator": validate.status()[target]}
+    # 2) LLM + RAG fallback; the validator's exact errors go back to the model
     out = llm.translate(spl, target)
     out["method"] = "llm"
-    for _ in range(2):
+    for _ in range(MAX_RETRIES):
         problems = validate.check(out.get("query", ""), target)
         if not problems or out.get("unsupported"):
             break
-        out = llm.translate(spl + f"\n\nPrevious attempt failed: {problems}", target)
+        out = llm.translate(retry_request(spl, target, out.get("query", ""), problems), target)
         out["method"] = "llm-retry"
-    out.setdefault("warnings", []).extend(validate.check(out.get("query", ""), target))
+    out.setdefault("warnings", []).extend(
+        f"validation: {p}" for p in validate.check(out.get("query", ""), target))
+    out["validator"] = validate.status()[target]
     return out
+
+
+MAX_RETRIES = 2
+
+
+def retry_request(spl: str, target: str, previous: str, problems: list[str]) -> str:
+    """Retry text for the model: its previous query and the validator's exact errors."""
+    listed = "\n".join(f"- {p}" for p in problems)
+    return (f"{spl}\n\nYour previous {target.upper()} translation was:\n{previous}\n\n"
+            f"The validator reported:\n{listed}\n\nReturn a corrected translation.")
 
 
 def status_for(res: dict) -> str:
@@ -111,7 +126,8 @@ def process_file(path, targets, force, map_hash=None):
                 "model": llm.MODEL if res.get("method", "").startswith("llm") else None,
                 "cached": bool(res.get("cached")),
                 "ts": int(time.time()),
-                **{k: res.get(k) for k in ("confidence", "method", "warnings", "tokens")}}
+                **{k: res.get(k) for k in ("confidence", "method", "warnings", "tokens",
+                                           "validator")}}
         meta_path.write_text(json.dumps(meta, indent=2))
         results.append({"file": shown, "target": t, "status": st})
     return results

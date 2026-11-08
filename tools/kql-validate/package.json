@@ -1,0 +1,11 @@
+{
+  "name": "siemx-kql-validate",
+  "version": "1.0.0",
+  "private": true,
+  "description": "KQL validation for siemx with Microsoft's official parser (Kusto.Language). Install: npm ci --prefix tools/kql-validate",
+  "main": "validate.js",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@kusto/language-service-next": "12.4.1"
+  }
+}
