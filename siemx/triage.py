@@ -6,12 +6,17 @@ MEDIUM = {"rex", "lookup", "join", "append", "inputlookup", "eval", "dedup", "ti
 
 
 def split_stages(spl: str) -> list[str]:
-    """Split on | but ignore pipes inside quotes or [subsearch] brackets."""
+    """Split on | but ignore pipes inside quotes or [subsearch] brackets.
+    Inside a quoted string a backslash escapes the next character (SPL: \\" is a quote
+    inside a string), so "a\\"b|c" stays one string."""
     stages, buf, depth, quote = [], [], 0, None
-    for ch in spl:
+    chars = iter(spl)
+    for ch in chars:
         if quote:
             buf.append(ch)
-            if ch == quote:
+            if ch == "\\":
+                buf.append(next(chars, ""))
+            elif ch == quote:
                 quote = None
         elif ch in "\"'":
             quote = ch
