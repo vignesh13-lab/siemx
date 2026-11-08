@@ -35,7 +35,13 @@ jobs:
         run: npm ci --prefix tools/kql-validate
       - name: Convert (unchanged files are skipped by hash)
         env:
+          # model choice = repository variables (Settings -> Secrets and variables ->
+          # Actions -> Variables); keys = secrets. Unset -> anthropic default.
+          SIEMX_PROVIDER: ${{ vars.SIEMX_PROVIDER }}
+          SIEMX_MODEL: ${{ vars.SIEMX_MODEL }}
+          SIEMX_BASE_URL: ${{ vars.SIEMX_BASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SIEMX_API_KEY: ${{ secrets.SIEMX_API_KEY }}
         run: siemx convert --workers 4 ${SIEMX_PATH:+--path "$SIEMX_PATH"} | tee run.jsonl
       - name: Summary
         run: |
