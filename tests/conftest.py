@@ -26,6 +26,13 @@ def fields_map(tmp_path, monkeypatch):
     return f
 
 
+@pytest.fixture(autouse=True)
+def no_repo_mappings(tmp_path, monkeypatch):
+    """Never apply the repo's mappings/field_map.json or client folders implicitly;
+    tests that need them point MAPPINGS_DIR somewhere on purpose."""
+    monkeypatch.setattr(config, "MAPPINGS_DIR", tmp_path / "isolated-mappings")
+
+
 @pytest.fixture
 def sources_map(tmp_path, monkeypatch):
     """Point rules at a known mappings file (rules binds MAP_FILE at import)."""

@@ -51,14 +51,18 @@ def field_type(table: str, target: str, field: str) -> str | None:
     return entry.get("types", {}).get(field)
 
 
-def check(parts: list, target: str) -> list[str]:
-    """Return warnings for unknown field reads; [] when all fields are known."""
+def field_reads(parts: list, target: str) -> dict:
+    """Walk the stages. -> {table, known, unknown, removed, created}
+    unknown  read but never available (not in the table, not created before)
+    removed  read after an earlier stage removed it
+    created  every name a stage creates (eval/rex/rename/stats aliases...)"""
     table = table_of(parts[0], target)
     known = known_fields(table, target)
     schema = set(known or [])
     seen = set(schema)                 # every field that existed at some point
     unknown: list[str] = []
     removed: list[str] = []
+    created: set[str] = set()
     for part in parts:                 # parts[0] may filter fields too (base search)
         for f in getattr(part, "reads", []):
             if f in schema or f in unknown or f in removed:
@@ -66,10 +70,20 @@ def check(parts: list, target: str) -> list[str]:
             (removed if f in seen else unknown).append(f)
         only = getattr(part, "only", None)
         if only is not None:
+            created |= set(only) - set(getattr(part, "reads", []))
             schema = set(only)
         schema -= set(getattr(part, "drop", []))
         schema |= set(getattr(part, "add", []))
+        created |= set(getattr(part, "add", []))
         seen |= schema
+    return {"table": table, "known": known, "unknown": unknown, "removed": removed,
+            "created": created}
+
+
+def check(parts: list, target: str) -> list[str]:
+    """Return warnings for unknown field reads; [] when all fields are known."""
+    r = field_reads(parts, target)
+    table, known, unknown, removed = r["table"], r["known"], r["unknown"], r["removed"]
     T = target.upper()
     warnings = []
     if removed:

@@ -4,7 +4,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from . import config, llm, mappings, rules, schema, triage, validate
+from . import config, fieldmap, llm, mappings, rules, schema, triage, validate
 
 
 def sha(text: str) -> str:
@@ -25,23 +25,46 @@ def render_parts(parts: list) -> list[str]:
     return out
 
 
-def convert_query(spl: str, target: str) -> dict:
-    spl = mappings.expand_macros(spl)        # client/shared Splunk macros
+def rule_parts(spl: str, target: str) -> list | None:
+    """Rules for every stage, or None if some stage has no rule."""
     stages = triage.split_stages(spl)
-    # 1) rules first
     head = rules.first_stage(stages[0], target)
     rest = [rules.stage(s, target) for s in stages[1:]]
-    if head and all(r is not None for r in rest):
-        parts = [head] + rest
+    if head is None or any(r is None for r in rest):
+        return None
+    return [head] + rest
+
+
+def apply_field_map(spl: str, parts: list, target: str) -> tuple[str, list, list[str], dict]:
+    """Rename source fields the table does not have, using mappings/field_map.json.
+    -> (spl, parts, warnings, applied). Unchanged when nothing applies."""
+    reads = schema.field_reads(parts, target)
+    p = fieldmap.plan(reads["unknown"], reads["created"], target, reads["table"])
+    if not p["renames"]:
+        return spl, parts, p["warnings"], {}
+    new_spl = fieldmap.rename_in_spl(spl, p["renames"])
+    new_parts = rule_parts(new_spl, target)
+    if new_parts is None:                       # should not happen; keep the original
+        return spl, parts, p["warnings"], {}
+    return new_spl, new_parts, p["warnings"], p["applied"]
+
+
+def convert_query(spl: str, target: str) -> dict:
+    spl = mappings.expand_macros(spl)        # client/shared Splunk macros
+    # 1) rules first
+    parts = rule_parts(spl, target)
+    if parts is not None:
+        spl, parts, map_warnings, applied = apply_field_map(spl, parts, target)
         q = "\n| ".join(render_parts(parts))
         # rules.Flagged parts carry warnings -> status_for() marks needs-review
         warnings = [w for part in parts for w in getattr(part, "warnings", [])]
+        warnings += map_warnings                       # conditional / ambiguous field names
         warnings += schema.check(parts, target)        # unknown field names -> review
         warnings += schema.order_check(parts, target)  # order-dependent stages -> review
         # safety net for bugs in our own rules (column errors are left to schema.check)
         warnings += [f"validation: {p}" for p in validate.check(q, target, scope="rules")]
         return {"query": q, "confidence": 0.9, "method": "rules", "warnings": warnings,
-                "tokens": 0, "validator": validate.status()[target]}
+                "tokens": 0, "validator": validate.status()[target], "field_map": applied}
     # 2) LLM + RAG fallback; the validator's exact errors go back to the model
     out = llm.translate(spl, target)
     out["method"] = "llm"
@@ -80,6 +103,7 @@ def mappings_hash() -> str:
     sources (shared + client), macros (shared + client) and the field lists."""
     fields = config.FIELDS_FILE.read_bytes() if config.FIELDS_FILE.exists() else b""
     blob = json.dumps({"sources": rules._load_sources(), "macros": mappings.load_macros(),
+                       "field_map": fieldmap.load_all(),
                        "fields": hashlib.sha256(fields).hexdigest()}, sort_keys=True)
     return sha(blob)
 
@@ -127,7 +151,7 @@ def process_file(path, targets, force, map_hash=None):
                 "cached": bool(res.get("cached")),
                 "ts": int(time.time()),
                 **{k: res.get(k) for k in ("confidence", "method", "warnings", "tokens",
-                                           "validator")}}
+                                           "validator", "field_map")}}
         meta_path.write_text(json.dumps(meta, indent=2))
         results.append({"file": shown, "target": t, "status": st})
     return results

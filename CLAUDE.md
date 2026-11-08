@@ -118,8 +118,17 @@ pytest -q
    LLM output with scope="all". The retry prompt gets the previous query and the exact
    errors with line/column. All 56 rule outputs of the 40-query test set and all 44 gold
    targets pass. A Cortex dry-run (real XQL check) would need a tenant + API key.
-6. Field mapping: mappings/field_map.json (CIM <-> ASIM <-> XDM) applied to field names in
-   outputs (mappings/fields.json already lists the known target columns for the check).
+6. DONE (framework + Windows defaults) field mapping, siemx/fieldmap.py:
+   mappings/field_map.json (shared) + mappings/clients/<client>/field_map.json, per target
+   table, with an evidence level: exact (applied), conditional (applied + flagged with its
+   condition), ambiguous (not applied; candidates flagged). No official full crosswalk
+   exists (Microsoft's Splunk migration guide says to build your own). Shared SecurityEvent
+   defaults come from Microsoft's Windows event docs (label <-> XML name) and are never
+   exact; `siemx fields import-props <props.conf> --stanza ... --client ... --table ...`
+   turns a client's own FIELDALIAS lines into exact entries (EVAL coalesce -> ambiguous).
+   Only fields READ from the source table and never CREATED in the query are renamed
+   (schema.field_reads), so the SPL identifier rename is safe. The LLM prompt gets the
+   matching entries. XQL / XDM entries: TODO (needs the xdr_data field list).
 7. Reverse direction: KQL/XQL -> SPL (parsers for KQL and XQL into the same stage/IR form).
 8. Reporting: `siemx report` writing a markdown/CSV summary per source type; hook into the MkDocs catalog.
 9. Pilot: run 50 real SPLs, measure accuracy per command, tune confidence thresholds.

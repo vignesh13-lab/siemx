@@ -62,11 +62,26 @@ def main():
     gs.add_argument("--to", choices=["kql", "xql"], default="kql")
     gsub.add_parser("check", help="do the rules still produce the rule-verified answers?")
 
+    fl = sub.add_parser("fields", help="field mapping (mappings/field_map.json)")
+    fsub = fl.add_subparsers(dest="fields_cmd", required=True)
+    fi = fsub.add_parser("import-props",
+                         help="import FIELDALIAS/EVAL from a client's Splunk props.conf")
+    fi.add_argument("props", help="path to props.conf (e.g. from Splunk_TA_windows/default)")
+    fi.add_argument("--stanza", required=True, help='e.g. "XmlWinEventLog:Security"')
+    fi.add_argument("--client", required=True)
+    fi.add_argument("--table", required=True, help="target table, e.g. SecurityEvent")
+    fi.add_argument("--to", choices=["kql", "xql"], default="kql")
+    fsh = fsub.add_parser("show", parents=[client], help="the field map for a table")
+    fsh.add_argument("--table", required=True)
+    fsh.add_argument("--to", choices=["kql", "xql"], default="kql")
+
     v = sub.add_parser("validate", help="check a KQL/XQL query (official KQL parser, XQL names)")
     v.add_argument("query", nargs="?", help="the query (omit to only show which validators run)")
     v.add_argument("--to", choices=["kql", "xql"], default="kql")
 
     a = p.parse_args()
+    if a.cmd == "fields":
+        return _fields(a)
     if a.cmd == "validate":
         from . import validate
         print(json.dumps(validate.status()))
@@ -91,6 +106,35 @@ def main():
                   f"  method={m.get('method')}")
             for w in m.get("warnings") or []:
                 print(f"    - {w}")
+
+
+def _fields(a):
+    from . import fieldmap, schema
+    if a.fields_cmd == "show":
+        config.set_client(a.client)
+        for k, e in sorted(fieldmap.table_map(a.to, a.table).items()):
+            right = e.get("to") or " | ".join(e.get("candidates", []))
+            print(f"{e.get('level', '?'):11} {k:28} -> {right}")
+        return
+    config.set_client(a.client)
+    columns = set(schema.known_fields(a.table, a.to) or [])
+    if not columns:
+        raise SystemExit(f"no column list for {a.table} in mappings/fields.json")
+    props = Path(a.props)
+    parsed = fieldmap.parse_props(props.read_text(encoding="utf-8", errors="replace"), a.stanza)
+    entries = fieldmap.entries_from_props(parsed, columns, f"{props.name} [{a.stanza}]")
+    out = config.client_dir() / "field_map.json"
+    data = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
+    section = data.setdefault(a.to, {}).setdefault(a.table, {"fields": {}})
+    section.setdefault("sources", []).append(f"{props.name} [{a.stanza}]")
+    section["fields"].update(entries)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    skipped = sorted(set(parsed) - set(entries))
+    print(json.dumps({"written": str(out.relative_to(config.ROOT)), "imported": len(entries),
+                      "exact": sum(1 for e in entries.values() if e["level"] == "exact"),
+                      "ambiguous": sum(1 for e in entries.values() if e["level"] == "ambiguous"),
+                      "skipped_not_a_column": skipped}))
 
 
 def _gold(a):
