@@ -20,7 +20,8 @@ def main():
     c = sub.add_parser("convert", parents=[client],
                        help="convert detections/spl/** (skips unchanged files)")
     c.add_argument("--to", default="kql,xql")
-    c.add_argument("--workers", type=int, default=4)
+    c.add_argument("--workers", type=int, default=None,
+                   help="parallel conversions (default 4; 1 with ollama, which runs one request at a time)")
     c.add_argument("--force", action="store_true")
     c.add_argument("--path", help="only convert detections/spl/<path>/** (e.g. a client folder)")
     c.add_argument("--from", dest="source", choices=["spl", "kql", "xql"], default="spl",
@@ -143,7 +144,8 @@ def main():
             print(f"note: {llm.NO_MODEL}. Queries that need the AI will be marked "
                   "unsupported and retried on the next run.", file=sys.stderr)
         targets = ["spl"] if a.source in ("kql", "xql") else a.to.split(",")
-        counts = pipeline.run(targets, a.workers, a.force, a.path, a.source)
+        workers = a.workers or llm.default_workers()
+        counts = pipeline.run(targets, workers, a.force, a.path, a.source)
         print(json.dumps({"summary": counts}))
     elif a.cmd == "status":
         print(json.dumps(pipeline.status(), indent=2))
