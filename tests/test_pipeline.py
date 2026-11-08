@@ -36,7 +36,7 @@ def test_process_file_writes_output_and_meta(workspace, no_llm):
     f = write_spl()
     results = pipeline.process_file(f, ["kql", "xql"], force=False)
     assert [r["status"] for r in results] == ["auto-approved", "auto-approved"]
-    for t, ext in config.EXT.items():
+    for t, ext in (("kql", ".kql"), ("xql", ".xql")):   # forward targets
         out = config.OUT_DIR / t / "windows" / f"top_hosts{ext}"
         assert out.read_text() == EXPECTED[t] + "\n"
         m = meta("top_hosts", t)
@@ -128,7 +128,7 @@ def test_unruled_stage_goes_to_llm_and_is_flagged(workspace, monkeypatch):
     """A stage with no rule must reach the LLM; a failed LLM result is unsupported."""
     calls = []
 
-    def stub(spl, target):
+    def stub(spl, target, **kw):
         calls.append(target)
         return {"query": "", "confidence": 0.0, "unsupported": True,
                 "warnings": ["LLM step failed: stub"], "tokens": 0}

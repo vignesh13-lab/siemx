@@ -141,7 +141,7 @@ def test_join_with_untranslatable_subsearch_goes_to_llm(two_sources, monkeypatch
     """`stats values()` has no rule -> the whole query falls back to the LLM."""
     calls = []
 
-    def stub(spl, target):
+    def stub(spl, target, **kw):
         calls.append(target)
         return {"query": "", "confidence": 0.0, "unsupported": True, "warnings": [], "tokens": 0}
 

@@ -22,6 +22,9 @@ def main():
     c.add_argument("--workers", type=int, default=4)
     c.add_argument("--force", action="store_true")
     c.add_argument("--path", help="only convert detections/spl/<path>/** (e.g. a client folder)")
+    c.add_argument("--from", dest="source", choices=["spl", "kql"], default="spl",
+                   help="input language: spl (detections/spl -> kql/xql) or kql "
+                        "(detections/kql -> spl)")
 
     sub.add_parser("status", parents=[client], help="counts per status")
     sub.add_parser("review", parents=[client], help="list needs-review / unsupported")
@@ -47,6 +50,8 @@ def main():
     e.add_argument("--verbose", action="store_true", help="list every miss")
     e.add_argument("--ablation", action="store_true",
                    help="score each retrieval option on its own (what helps, what hurts)")
+    e.add_argument("--reverse", action="store_true",
+                   help="KQL -> SPL retrieval, scored on the gold pairs read backwards")
 
     g = sub.add_parser("gold", help="verified SPL -> KQL/XQL examples (gold/pairs.jsonl)")
     gsub = g.add_subparsers(dest="gold_cmd", required=True)
@@ -132,7 +137,8 @@ def main():
         return _gold(a)
     config.set_client(a.client)
     if a.cmd == "convert":
-        counts = pipeline.run(a.to.split(","), a.workers, a.force, a.path)
+        targets = ["spl"] if a.source == "kql" else a.to.split(",")
+        counts = pipeline.run(targets, a.workers, a.force, a.path, a.source)
         print(json.dumps({"summary": counts}))
     elif a.cmd == "status":
         print(json.dumps(pipeline.status(), indent=2))
@@ -240,6 +246,23 @@ def _docs(a):
         index = rag.get_index(docs.index_dir() / "chunks.jsonl")
         if index is None:
             raise SystemExit("no index: run `siemx docs fetch` and `siemx docs build` first")
+        if a.reverse:
+            from . import gold
+            rcases = rag_eval.reverse_cases(gold.load())
+            print(f"{'configuration':22} {'SPL hit':>8} {'recall':>7} {'mrr':>6}  ({len(rcases)} cases)")
+            configs = [("bm25, no bridge", rag.Options(use_bridge=False, mode="bm25")),
+                       ("bm25 + bridge", rag.Options(mode="bm25"))]
+            if index.vec is not None:
+                configs.append(("hybrid (default)", rag.Options()))
+            rep = None
+            for label, opts in configs:
+                rep = rag_eval.evaluate_reverse(
+                    index, rcases, lambda i, q, t, source, o=opts: rag.retrieve(i, q, t, opts=o, source=source))
+                print(f"{label:22} {rep['hit']:8.3f} {rep['recall']:7.3f} {rep['mrr']:6.3f}")
+            if a.verbose and rep:
+                for m in rep["misses"]:
+                    print(f"  miss {m['missing']}: {m['kql'][:90]!r}")
+            return
         cases = rag_eval.load_cases(docs.rag_dir() / "eval.jsonl")
         if a.ablation:
             configs = [
