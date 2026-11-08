@@ -86,7 +86,9 @@ def process_file(path, targets, force):
         config.META_DIR.mkdir(parents=True, exist_ok=True)
         meta = {"src": (config.SRC_REL / path.relative_to(config.SRC_DIR)).as_posix(),
                 "src_hash": h, "converter": config.CONVERTER_VERSION, "target": t, "status": st,
-                "complexity": triage.complexity(spl), "model": llm.MODEL,
+                "complexity": triage.complexity(spl),
+                "model": llm.MODEL if res.get("method", "").startswith("llm") else None,
+                "cached": bool(res.get("cached")),
                 "ts": int(time.time()),
                 **{k: res.get(k) for k in ("confidence", "method", "warnings", "tokens")}}
         meta_path.write_text(json.dumps(meta, indent=2))
