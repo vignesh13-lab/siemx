@@ -36,7 +36,7 @@ def test_process_file_writes_output_and_meta(workspace, no_llm):
     f = write_spl()
     results = pipeline.process_file(f, ["kql", "xql"], force=False)
     assert [r["status"] for r in results] == ["auto-approved", "auto-approved"]
-    for t, ext in config.EXT.items():
+    for t, ext in (("kql", ".kql"), ("xql", ".xql")):   # forward targets
         out = config.OUT_DIR / t / "windows" / f"top_hosts{ext}"
         assert out.read_text() == EXPECTED[t] + "\n"
         m = meta("top_hosts", t)

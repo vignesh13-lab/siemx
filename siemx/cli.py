@@ -22,6 +22,9 @@ def main():
     c.add_argument("--workers", type=int, default=4)
     c.add_argument("--force", action="store_true")
     c.add_argument("--path", help="only convert detections/spl/<path>/** (e.g. a client folder)")
+    c.add_argument("--from", dest="source", choices=["spl", "kql"], default="spl",
+                   help="input language: spl (detections/spl -> kql/xql) or kql "
+                        "(detections/kql -> spl)")
 
     sub.add_parser("status", parents=[client], help="counts per status")
     sub.add_parser("review", parents=[client], help="list needs-review / unsupported")
@@ -132,7 +135,8 @@ def main():
         return _gold(a)
     config.set_client(a.client)
     if a.cmd == "convert":
-        counts = pipeline.run(a.to.split(","), a.workers, a.force, a.path)
+        targets = ["spl"] if a.source == "kql" else a.to.split(",")
+        counts = pipeline.run(targets, a.workers, a.force, a.path, a.source)
         print(json.dumps({"summary": counts}))
     elif a.cmd == "status":
         print(json.dumps(pipeline.status(), indent=2))

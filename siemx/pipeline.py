@@ -1,4 +1,5 @@
 import hashlib
+from pathlib import Path
 import json
 import sys
 import time
@@ -130,33 +131,53 @@ def is_current(meta_path, src_hash: str, map_hash: str) -> bool:
             and m.get("mappings_hash") == map_hash)
 
 
-def meta_path_for(path, target: str):
-    """converted/_meta/<same folders as detections/spl>/<name>.<target>.json, so files
+SOURCES = {"spl": ".spl", "kql": ".kql"}     # input language -> file extension
+
+
+def source_dir(source: str = "spl") -> tuple[Path, Path]:
+    """(absolute folder, repo-relative folder) of the input files: detections/<source>."""
+    if source == "spl":
+        return config.SRC_DIR, config.SRC_REL
+    return config.SRC_DIR.parent / source, config.SRC_REL.parent / source
+
+
+def meta_path_for(path, target: str, source: str = "spl"):
+    """converted/_meta/<same folders as detections/<source>>/<name>.<target>.json, so files
     with the same name in different folders do not overwrite each other."""
-    rel = path.relative_to(config.SRC_DIR)
+    rel = path.relative_to(source_dir(source)[0])
     return config.META_DIR / rel.parent / f"{rel.stem}.{target}.json"
 
 
-def process_file(path, targets, force, map_hash=None):
+def convert_any(text: str, target: str, source: str = "spl") -> dict:
+    if source == "spl":
+        return convert_query(text, target)
+    if source == "kql" and target == "spl":
+        from . import reverse
+        return reverse.convert(text)
+    raise ValueError(f"no conversion from {source} to {target}")
+
+
+def process_file(path, targets, force, map_hash=None, source="spl"):
     spl = path.read_text()
     h = sha(spl)
     map_hash = map_hash or mappings_hash()
     name = path.stem
-    rel = path.relative_to(config.SRC_DIR).parent
+    src_dir, src_rel = source_dir(source)
+    rel = path.relative_to(src_dir).parent
     shown = (rel / name).as_posix()
     results = []
     for t in targets:
-        meta_path = meta_path_for(path, t)
+        meta_path = meta_path_for(path, t, source)
         if not force and is_current(meta_path, h, map_hash):
             results.append({"file": shown, "target": t, "status": "skipped"})
             continue
-        res = convert_query(spl, t)
+        res = convert_any(spl, t, source)
         st = status_for(res)
         out_file = config.OUT_DIR / t / rel / f"{name}{config.EXT[t]}"
         out_file.parent.mkdir(parents=True, exist_ok=True)
         out_file.write_text(res.get("query", "") + "\n")
         meta_path.parent.mkdir(parents=True, exist_ok=True)
-        meta = {"src": (config.SRC_REL / path.relative_to(config.SRC_DIR)).as_posix(),
+        meta = {"src": (src_rel / path.relative_to(src_dir)).as_posix(), "source": source,
                 "client": config.CLIENT, "mappings_hash": map_hash,
                 "src_hash": h, "converter": config.CONVERTER_VERSION, "target": t, "status": st,
                 "complexity": triage.complexity(spl),
@@ -170,15 +191,16 @@ def process_file(path, targets, force, map_hash=None):
     return results
 
 
-def run(targets, workers=4, force=False, path=None):
-    """Convert detections/spl/** (or only detections/spl/<path>/**)."""
-    root = config.SRC_DIR / path if path else config.SRC_DIR
-    files = sorted(root.rglob("*.spl"))
-    print(f"found {len(files)} SPL files -> {','.join(targets)}", file=sys.stderr)
+def run(targets, workers=4, force=False, path=None, source="spl"):
+    """Convert detections/<source>/** (or only detections/<source>/<path>/**)."""
+    base = source_dir(source)[0]
+    root = base / path if path else base
+    files = sorted(root.rglob("*" + SOURCES[source]))
+    print(f"found {len(files)} {source.upper()} files -> {','.join(targets)}", file=sys.stderr)
     counts = {}
     with ThreadPoolExecutor(max_workers=workers) as pool:
         map_hash = mappings_hash()            # once per run, not per file
-        futs = {pool.submit(process_file, f, targets, force, map_hash): f for f in files}
+        futs = {pool.submit(process_file, f, targets, force, map_hash, source): f for f in files}
         for i, fut in enumerate(as_completed(futs), 1):
             for r in fut.result():
                 counts[r["status"]] = counts.get(r["status"], 0) + 1

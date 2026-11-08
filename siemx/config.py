@@ -17,7 +17,7 @@ GOLD_DIR = ROOT / "gold"
 # the shared files and writes output to converted/acme/.
 CLIENT: str | None = None
 
-EXT = {"kql": ".kql", "xql": ".xql"}
+EXT = {"kql": ".kql", "xql": ".xql", "spl": ".spl"}
 CONF_AUTO_APPROVE = 0.85   # at or above this -> auto-approved
 
 # Bump whenever rules/prompts change output, so unchanged SPL is re-converted.

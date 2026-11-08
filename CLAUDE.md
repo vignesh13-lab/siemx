@@ -129,7 +129,15 @@ pytest -q
    Only fields READ from the source table and never CREATED in the query are renamed
    (schema.field_reads), so the SPL identifier rename is safe. The LLM prompt gets the
    matching entries. XQL / XDM entries: TODO (needs the xdr_data field list).
-7. Reverse direction: KQL/XQL -> SPL (parsers for KQL and XQL into the same stage/IR form).
+7. PART 1 DONE: KQL -> SPL by rules (siemx/reverse.py, siemx/kql_expr.py):
+   `siemx convert --from kql` reads detections/kql/**/*.kql, writes converted/spl/.
+   Input checked with Microsoft's parser; table -> base search from sources.json read
+   backwards; TimeGenerated > ago(N) -> earliest=-N; where/project/project-away/
+   project-rename/extend/summarize/count/take/sort/top/distinct. KQL sort is DESC by
+   default; sort 0 avoids SPL's 10,000-row cap; =~/contains use lower() + like() with
+   lowercased values (SPL like/in case sensitivity is undocumented); `has` -> unsupported.
+   Round-trip tests: KQL -> SPL -> KQL gives the original for exact cases.
+   NEXT: part 2 LLM fallback for KQL -> SPL; part 3 XQL -> SPL (no official parser).
 8. DONE siemx report (siemx/report.py): converted/<client>/_report/report.md + summary.csv
    (summary per source, warning categories, SPL commands without rules, review accuracy by
    status/method/target/command, LLM auto-approval threshold analysis), --mkdocs writes a
