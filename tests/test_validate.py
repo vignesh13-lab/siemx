@@ -138,5 +138,5 @@ def test_retry_gets_previous_query_and_exact_errors(workspace, monkeypatch):
 
 def test_status_reports_what_ran():
     s = validate.status()
-    assert set(s) == {"kql", "xql", "spl"} and s["xql"].startswith("name check")
+    assert set(s) == {"kql", "xql", "spl", "elk"} and s["xql"].startswith("name check")
     assert s["spl"].startswith("command-name check")

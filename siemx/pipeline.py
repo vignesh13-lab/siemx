@@ -64,6 +64,8 @@ def apply_field_map(spl: str, parts: list, target: str) -> tuple[str, list, list
 
 def convert_query(spl: str, target: str) -> dict:
     spl = mappings.expand_macros(spl)        # client/shared Splunk macros
+    if target == "elk":
+        return convert_elk(spl)
     # 1) rules first
     parts = rule_parts(spl, target)
     if parts is not None:
@@ -84,6 +86,20 @@ def convert_query(spl: str, target: str) -> dict:
     out = llm_with_retry(spl, target)
     out["no_rule"] = missing_rules(spl, target)
     return out
+
+
+def convert_elk(spl: str) -> dict:
+    """SPL -> Kibana KQL (elk.py): filters only, so no stage-by-stage rules."""
+    from . import elk
+    res = elk.convert(spl)
+    if res is None:                                   # a filter the rules cannot read
+        out = llm_with_retry(spl, "elk")
+        out["no_rule"] = elk.missing_rules(spl)
+        return out
+    if res.get("query"):
+        res["warnings"] += [f"validation: {p}" for p in validate.check(res["query"], "elk")]
+    res["validator"] = validate.status()["elk"]
+    return res
 
 
 W_XQL_JOIN_CASE = ("XQL: config case_sensitive = true was added for a string comparison; "
@@ -172,7 +188,7 @@ def is_current(meta_path, src_hash: str, map_hash: str) -> bool:
 LLM_FAILED = "LLM step failed"
 
 
-SOURCES = {"spl": ".spl", "kql": ".kql", "xql": ".xql"}     # input language -> file extension
+SOURCES = {"spl": ".spl", "kql": ".kql", "xql": ".xql", "elk": ".elk"}     # input language -> file extension
 
 
 def source_dir(source: str = "spl") -> tuple[Path, Path]:
@@ -192,16 +208,17 @@ def meta_path_for(path, target: str, source: str = "spl"):
 def convert_any(text: str, target: str, source: str = "spl") -> dict:
     if source == "spl":
         return convert_query(text, target)
-    if source in ("kql", "xql") and target == "spl":
-        from . import reverse, reverse_xql
-        res = (reverse if source == "kql" else reverse_xql).convert(text)
+    if source in ("kql", "xql", "elk") and target == "spl":
+        from . import reverse, reverse_elk, reverse_xql
+        res = {"kql": reverse, "xql": reverse_xql, "elk": reverse_elk}[source].convert(text)
         if res.get("unsupported") and res.get("llm_base"):
             rule_gap, table = res["warnings"], res.get("llm_table")
             res = llm_with_retry(text, "spl", source=source, base=res["llm_base"])
             res["no_rule"] = [w.removeprefix("not converted: ") for w in rule_gap]
             if not res.get("unsupported"):
                 # the model keeps the source column names (as told); a person must map them
-                kind = "KQL table" if source == "kql" else "XQL dataset"
+                kind = {"kql": "KQL table", "xql": "XQL dataset",
+                        "elk": "Elastic index pattern"}[source]
                 res.setdefault("warnings", []).append(
                     f"SPL: LLM translation keeps the {kind}'s column names ({table}); "
                     "map them to your Splunk field names")
@@ -237,7 +254,8 @@ def process_file(path, targets, force, map_hash=None, source="spl"):
                 "cached": bool(res.get("cached")),
                 "ts": int(time.time()), "query_sha": sha(res.get("query", "")),
                 **{k: res.get(k) for k in ("confidence", "method", "warnings", "tokens",
-                                           "validator", "field_map", "no_rule")}}
+                                           "validator", "field_map", "no_rule")},
+                **({"index": res["index"]} if res.get("index") else {})}
         meta_path.write_text(json.dumps(meta, indent=2))
         results.append({"file": shown, "target": t, "status": st})
     return results

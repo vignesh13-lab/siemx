@@ -55,7 +55,8 @@ def model_id() -> str:
         return "invalid SIEMX_PROVIDER"
     return s["model"] if s["provider"] == "anthropic" else f"{s['provider']}:{s['model']}"
 NAMES = {"kql": "KQL (Microsoft Sentinel / Defender)", "xql": "XQL (Palo Alto Cortex XDR/XSIAM)",
-         "spl": "SPL (Splunk)"}
+         "spl": "SPL (Splunk)",
+         "elk": "Kibana Query Language (Elastic; not Microsoft KQL)"}
 
 SYSTEM = (
     "You translate SIEM queries between languages. Use ONLY the reference "
@@ -75,6 +76,11 @@ def retrieve(spl: str, target: str, source: str = "spl") -> dict:
              KQL -> SPL the same pairs read backwards"""
     from . import docs, gold
     from . import retrieve as rag
+    if "elk" in (target, source):
+        # no Elastic docs in the RAG index: one page covers the language (elk.REFERENCE)
+        from .elk import REFERENCE
+        examples = gold.examples_for_prompt(spl, target, k=EXAMPLES_K) if source == "spl" else []
+        return {"docs": [REFERENCE], "examples": examples, "field_map": {}}
     examples = gold.examples_for_prompt(spl, target, k=EXAMPLES_K, source=source)
     fields = field_hints(spl, target) if source == "spl" else {}
     index = rag.get_index(docs.index_dir() / "chunks.jsonl")
@@ -88,6 +94,8 @@ def field_hints(spl: str, target: str) -> dict:
     """Field-map entries (mappings/field_map.json) for field names used in this SPL,
     when the base search maps to a known table."""
     from . import fieldmap, rules, triage
+    if target == "elk":
+        return {}
     first = rules.first_stage(triage.split_stages(spl)[0], target)
     table = getattr(first, "table", None)
     if not table:
@@ -126,11 +134,18 @@ FORWARD_PITFALLS = {
     "xql": ("XQL string comparison is case-insensitive by default; SPL where/eval comparison "
             "is case-sensitive (search terms are not). If the SPL compares strings in where or "
             "eval, start the XQL with `config case_sensitive = true`.\n"),
+    "elk": ("Kibana KQL only filters events. If the SPL needs stats, eval, dedup, transaction "
+            "or any other transforming command, answer unsupported. Return one Kibana KQL "
+            "filter with no pipes and no index; keep the SPL field names; quote values without "
+            "wildcards; parenthesize mixed and/or.\n"),
 }
 
 
 REVERSE_PITFALLS = {
     "kql": "KQL sort is descending by default;",
+    "elk": ("Kibana KQL `field: value` matches keyword fields exactly and case-sensitively "
+            "and text fields by words, while SPL field=value is whole-value and "
+            "case-insensitive; in Kibana KQL * inside quotes is a literal asterisk;"),
     "xql": ("XQL string comparison is case-insensitive unless `config case_sensitive = true` "
             "while SPL where/eval comparison is case-sensitive; in XQL \"...\" strings * is a "
             "wildcard; XQL `config timeframe` is the time range (M = minutes);"),

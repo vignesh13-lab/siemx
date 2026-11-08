@@ -46,6 +46,12 @@ CATEGORIES = [
     ("!= null handling", r"!= null handling"),
     ("XQL undocumented behaviour", r"^XQL.*(not documented|not stated|verify it keeps)"),
     ("dropped index", r"index=.* was dropped"),
+    ("ELK: only a filter (stats etc. have no equivalent)", r"^ELK: Kibana KQL only selects"),
+    ("ELK: no index pattern mapped", r"^ELK: (no index pattern|the SPL names no index)"),
+    ("ELK: columns dropped (table/fields/sort)", r"^ELK: .* dropped: they choose or order"),
+    ("ELK/SPL: case and whole-value matching", r"case-sensitively"),
+    ("field names not mapped (ELK)", r"field names kept from (Splunk|Elastic)"),
+    ("SPL: no index pattern header", r"names no index pattern"),
     ("other rule caveat", r"."),
 ]
 
