@@ -1,7 +1,7 @@
 # siemx: how it works and how to use it
 
-siemx converts Splunk detections (SPL) into Microsoft Sentinel (KQL) and Palo Alto
-Cortex XDR/XSIAM (XQL), and back. It is built for accuracy, not speed: every result
+siemx converts Splunk detections (SPL) into Microsoft Sentinel (KQL), Palo Alto
+Cortex XDR/XSIAM (XQL) and Elastic (Kibana KQL, called `elk` in siemx), and back. It is built for accuracy, not speed: every result
 gets a status, and anything uncertain goes to a person for review.
 
 - [1. What it does, in one picture](#1-what-it-does-in-one-picture)
@@ -95,9 +95,13 @@ for every client:
 
 ```json
 {
-  "sourcetype=XmlWinEventLog:Security": {"kql": "SecurityEvent", "xql": "dataset = xdr_data"}
+  "sourcetype=XmlWinEventLog:Security": {"kql": "SecurityEvent", "xql": "dataset = xdr_data",
+                                         "elk": "logs-system.security-*"}
 }
 ```
+
+For Elastic the value is the **index pattern** your Elastic rule searches (use your real one;
+the example is only an illustration).
 
 Tested result:
 
@@ -159,11 +163,41 @@ Useful options:
 
 | Option | Does |
 |---|---|
-| `--to kql` | only one target |
+| `--to kql` | only one target (`kql`, `xql` or `elk`) |
 | `--path windows` | only `detections/spl/windows/**` |
 | `--force` | convert everything again |
 | `--client acme` | use `mappings/clients/acme/` and write to `converted/acme/` |
-| `--from kql` / `--from xql` | the reverse: KQL or XQL files from `detections/kql` or `detections/xql` into SPL |
+| `--from kql` / `--from xql` / `--from elk` | the reverse: files from `detections/kql`, `detections/xql` or `detections/elk` into SPL |
+
+### Elastic (Kibana KQL)
+
+```powershell
+siemx convert --to elk          # detections/spl -> converted/elk/*.elk
+siemx convert --from elk        # detections/elk/*.elk -> converted/spl/*.spl
+```
+
+Kibana KQL (the language in Kibana's search bar and in Elastic "custom query" rules)
+**only selects events**. It has no `stats`, `eval`, `table` or pipes. So:
+
+| SPL detection | ELK result |
+|---|---|
+| search terms only (`EventCode=4625 user!=admin*`) | `EventCode: 4625 and (user: * and not user: admin*)`, needs-review |
+| `... \| table ...` / `fields` / `sort` | the filter; those stages are dropped with a note (they only pick columns) |
+| `... \| stats count by user \| where count > 10` | **unsupported**, but the file keeps the filter (`EventCode: 4625`). Rebuild the counting as an Elastic threshold rule, or in ES\|QL |
+
+Every ELK result is reviewed, because:
+
+- Elastic matches most fields **exactly and case-sensitively**; Splunk does not.
+- Elastic uses its own field names (ECS: `event.code`, `user.name`). siemx keeps the Splunk
+  names until you map them in `mappings/field_map.json` under `"elk"`.
+
+An `.elk` input file has no index in it, so you can start it with one line telling siemx
+which data it is for:
+
+```
+# index: logs-system.security-*
+event.code: 4625 and not user.name: "SYSTEM"
+```
 
 ## 6. Read the results
 
@@ -313,4 +347,5 @@ Wrong patterns become new rules or tests, so the same mistake is caught next tim
 
 **What does it not handle yet?** Splunk commands without rules (for example
 `transaction`; the report lists them), XQL field names (needs the xdr_data field list),
-and importing `savedsearches.conf` / YAML directly.
+importing `savedsearches.conf` / YAML directly, Elastic's ES|QL and EQL (only Kibana KQL),
+and KQL/XQL straight to Elastic.

@@ -186,7 +186,20 @@ pytest -q
    (correct|fixed|wrong, append-only converted/<client>/_reviews.jsonl, stale when the
    judged query changes). Thresholds change only in a reviewed PR, based on the report.
 
+10. DONE Elastic, as Kibana KQL ("elk", never confused with Microsoft KQL; ext .elk).
+   siemx/elk.py: a port of Kibana's grammar.peggy (validator + reader), SPL -> ELK rules
+   from the search.py AST; siemx/reverse_elk.py: ELK -> SPL. Sources in elk.py docstring.
+   Kibana KQL only filters: base search + later `search` stages convert; table/fields/sort
+   are dropped with a warning; any transforming command (stats, eval, ...) -> unsupported
+   with the filter part kept in the file (no LLM: a model cannot express stats in a filter
+   either). Filter gaps (free text, where) go to the LLM with elk.REFERENCE as its doc.
+   Always flagged: keyword case sensitivity vs SPL, unmapped field names (ECS names are
+   not seeded: map them in field_map.json under "elk"), missing "elk" index pattern in
+   sources.json. ELK input files may start with `# index: <pattern>` (mapped back to a
+   Splunk source). Not done: ES|QL and EQL; KQL/XQL -> ELK.
+
 ## Open questions (need a human with access)
+- Elastic: index patterns per sourcetype and the ECS field names in use (field_map.json "elk").
 - XQL: field list for xdr_data; `count` as an alias; whether `fields - x` keeps all other fields.
 
 ## Definition of done for any task

@@ -24,9 +24,10 @@ def main():
                    help="parallel conversions (default 4; 1 with ollama, which runs one request at a time)")
     c.add_argument("--force", action="store_true")
     c.add_argument("--path", help="only convert detections/spl/<path>/** (e.g. a client folder)")
-    c.add_argument("--from", dest="source", choices=["spl", "kql", "xql"], default="spl",
-                   help="input language: spl (detections/spl -> kql/xql) or kql "
-                        "(detections/kql -> spl)")
+    c.add_argument("--from", dest="source", choices=["spl", "kql", "xql", "elk"],
+                   default="spl",
+                   help="input language: spl (detections/spl -> the --to targets) or kql / "
+                        "xql / elk (detections/<lang> -> spl). elk = Kibana KQL (Elastic)")
 
     sub.add_parser("status", parents=[client], help="counts per status")
     sub.add_parser("review", parents=[client], help="list needs-review / unsupported")
@@ -74,7 +75,7 @@ def main():
     rp.add_argument("--mkdocs", help="also write a SIEM Hub docs page into this folder")
     vd = sub.add_parser("verdict", parents=[client], help="record a review result (pilot)")
     vd.add_argument("spl_file", help="path under detections/spl, e.g. windows/brute_force.spl")
-    vd.add_argument("--to", choices=["kql", "xql"], required=True)
+    vd.add_argument("--to", choices=["kql", "xql", "elk"], required=True)
     vd.add_argument("--result", choices=["correct", "fixed", "wrong"], required=True)
     vd.add_argument("--by", required=True, help="who reviewed it")
     vd.add_argument("--notes", default="")
@@ -99,7 +100,7 @@ def main():
 
     v = sub.add_parser("validate", help="check a KQL/XQL query (official KQL parser, XQL names)")
     v.add_argument("query", nargs="?", help="the query (omit to only show which validators run)")
-    v.add_argument("--to", choices=["kql", "xql"], default="kql")
+    v.add_argument("--to", choices=["kql", "xql", "elk", "spl"], default="kql")
 
     a = p.parse_args()
     if a.cmd == "pilot-sample":
@@ -143,7 +144,10 @@ def main():
         if not llm.configured():
             print(f"note: {llm.NO_MODEL}. Queries that need the AI will be marked "
                   "unsupported and retried on the next run.", file=sys.stderr)
-        targets = ["spl"] if a.source in ("kql", "xql") else a.to.split(",")
+        targets = ["spl"] if a.source != "spl" else a.to.split(",")
+        bad = [t for t in targets if t not in ("kql", "xql", "elk")] if a.source == "spl" else []
+        if bad:
+            p.error(f"--to: unknown target {', '.join(bad)} (use kql, xql, elk)")
         workers = a.workers or llm.default_workers()
         counts = pipeline.run(targets, workers, a.force, a.path, a.source)
         print(json.dumps({"summary": counts}))

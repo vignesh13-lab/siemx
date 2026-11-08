@@ -263,10 +263,14 @@ def status() -> dict:
             "xql": "name check against the official reference" if xql_reference()
             else "basic checks only (rag/sources.json missing)",
             "spl": "command-name check against the official reference" if spl_commands()
-            else "basic checks only (rag/sources.json missing)"}
+            else "basic checks only (rag/sources.json missing)",
+            "elk": "Kibana's KQL grammar (port in siemx/elk.py)"}
 
 
 def check(query: str, target: str, scope: str = "all") -> list[str]:
+    if target == "elk":               # escapes like \( make the generic paren count wrong
+        from . import elk
+        return elk.problems(query)[:MAX_PROBLEMS]
     problems = basic_problems(query)
     if problems and "empty output" in problems:
         return problems

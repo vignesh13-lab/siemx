@@ -17,7 +17,7 @@ GOLD_DIR = ROOT / "gold"
 # the shared files and writes output to converted/acme/.
 CLIENT: str | None = None
 
-EXT = {"kql": ".kql", "xql": ".xql", "spl": ".spl"}
+EXT = {"kql": ".kql", "xql": ".xql", "spl": ".spl", "elk": ".elk"}   # elk = Kibana KQL
 CONF_AUTO_APPROVE = 0.85   # at or above this -> auto-approved
 # LLM results are never auto-approved until the pilot shows the model's own confidence
 # can be trusted (`siemx report`: accuracy of auto-approved). A local 7B model reported
