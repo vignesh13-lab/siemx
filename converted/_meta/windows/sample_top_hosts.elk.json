@@ -1,0 +1,28 @@
+{
+  "src": "detections/spl/windows/sample_top_hosts.spl",
+  "source": "spl",
+  "client": null,
+  "mappings_hash": "08471f4df0ab1e98",
+  "src_hash": "6b8ea45158ffe582",
+  "converter": "23",
+  "target": "elk",
+  "status": "unsupported",
+  "complexity": "simple",
+  "model": null,
+  "cached": false,
+  "ts": 1794243180,
+  "query_sha": "e3b0c44298fc1c14",
+  "confidence": 0.0,
+  "method": "rules",
+  "warnings": [
+    "ELK: Kibana KQL only selects events; `stats`, `sort`, `head` have no equivalent. Rebuild the rest in Elastic (a threshold rule for `stats count by ... | where count > N`, otherwise ES|QL)"
+  ],
+  "tokens": 0,
+  "validator": "Kibana's KQL grammar (port in siemx/elk.py)",
+  "field_map": null,
+  "no_rule": [
+    "stats",
+    "sort",
+    "head"
+  ]
+}
