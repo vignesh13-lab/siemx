@@ -663,8 +663,10 @@ is valid.
 
 These improve AI answers. You do not need them for rules-only use.
 
-**Official documentation index (RAG).** siemx can download the official SPL, KQL and XQL
-documentation and give the AI the relevant excerpts:
+**Official documentation index (RAG).** siemx can download the official SPL, KQL, XQL and
+Elastic documentation and give the AI the relevant excerpts. For Elastic that is the Kibana
+KQL reference, the Elastic Security rule types (custom query, threshold) and the ECS field
+reference (what `event.code`, `source.ip`, ... mean and their types):
 
 ```powershell
 siemx docs discover          # list the official pages -> rag/sources.json

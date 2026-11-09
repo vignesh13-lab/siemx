@@ -222,6 +222,13 @@ pytest -q
    process_file writes W_RULES_ONLY naming the stages (no_rule, counted). Meta keeps
    rules_only, so the result is skipped while AI stays off and re-tried once a provider is
    set (is_current).
+15. DONE Elastic in the RAG: docs.discover_elk (Kibana KQL pages from elastic/elasticsearch and
+   elastic/docs-content, Security rule types, every ECS field set from elastic/ecs; Markdown
+   on GitHub, cited as elastic.co/docs), clean_elastic_markdown (MyST: front matter,
+   {{subs}} from docs-content docset.yml, $$$anchors$$$, :::{note}, {applies_to}),
+   retrieve.retrieve_elk (Kibana syntax chunks + the ECS definition of each dotted field +
+   for ELK -> KQL/XQL/SPL the target operators each construct becomes). llm.retrieve keeps
+   elk.REFERENCE first and adds these when the index is built.
 
 ## Open questions (need a human with access)
 - Elastic: index patterns per sourcetype and the ECS field names in use (field_map.json "elk").

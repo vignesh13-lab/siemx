@@ -573,7 +573,7 @@ def missing_rules(spl: str) -> list[str]:
 # ---- for the LLM prompt (own summary of DOC + GRAMMAR; no copied doc text) -----------------------
 
 REFERENCE = {
-    "source": DOC, "lang": "elk", "title": "Kibana Query Language (KQL) syntax",
+    "source": DOC, "lang": "elk", "title": "siemx summary of the Kibana KQL syntax docs",
     "text": (
         "Kibana KQL filters documents; it has no pipes, no aggregation, no field creation, "
         "no column selection. Syntax: `field: value`; several values `field: (a or b)`; "

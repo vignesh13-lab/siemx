@@ -21,7 +21,7 @@ from pathlib import Path
 
 MAX_CHARS = 1500          # ~400 tokens; long enough for a syntax block + parameters
 MIN_CHARS = 80            # smaller pieces are merged into the previous chunk
-LANG_LABEL = {"spl": "SPL", "kql": "KQL", "xql": "XQL"}
+LANG_LABEL = {"spl": "SPL", "kql": "KQL", "xql": "XQL", "elk": "Elastic"}
 _HEADING = re.compile(r"^(#{1,4}) +(.+?)\s*$")
 _SIGNATURE = re.compile(r"^`?([A-Za-z_][A-Za-z0-9_.-]*)\s*\(")   # "len(<str>)" -> len
 

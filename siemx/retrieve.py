@@ -296,6 +296,97 @@ def retrieve(index: BM25Index, spl: str, target: str, budget: int = BUDGET_CHARS
     return Retrieved(docs, trace)
 
 
+# ---- Elastic (Kibana KQL) -----------------------------------------------------------------
+# Kibana KQL is one filter, not a pipeline of stages, so it gets its own small retrieval:
+# the best Kibana KQL syntax sections, the ECS definition of every dotted field name in the
+# query, and (Elastic -> KQL/XQL/SPL) the target language's docs for the query text.
+
+ELK_SYNTAX_CHUNKS = 3
+_DOTTED = re.compile(r"\b[a-z_@][a-z0-9_]*(?:\.[a-z0-9_]+)+\b")
+# What each Kibana KQL construct becomes in the target language (from_elk.py / reverse_elk.py),
+# so the target's docs for exactly those operators are given (names as indexed by chunking).
+ELK_TARGET_NAMES = {
+    "kql": {"base": ["where"], "wild": ["contains_cs", "startswith_cs", "endswith_cs", "matches"],
+            "exists": ["isnotempty"], "not": ["not"], "list": ["in"], "cidr": ["ipv4_is_in_range"]},
+    "xql": {"base": ["filter", "config"], "cidr": ["incidr"]},
+    "spl": {"base": ["search"], "cidr": ["cidrmatch"], "wild": ["like"]},
+}
+_CIDR = re.compile(r"\d+\.\d+\.\d+\.\d+/\d+")
+
+
+def elk_features(text: str) -> set[str]:
+    """Constructs used in a Kibana KQL query: wild, exists, not, list, cidr."""
+    from . import elk
+    from .reverse_elk import read_header
+    try:
+        ast = elk.parse(read_header(text)[1])
+    except elk.ParseError:
+        return set()
+    feats = set()
+
+    def walk(n):
+        if n[0] == "is":
+            if n[2].kind == "wild":
+                feats.add("exists" if n[2].text == elk.WILD else "wild")
+            if _CIDR.search(n[2].text):
+                feats.add("cidr")
+        elif n[0] == "not":
+            feats.add("not")
+            walk(n[1])
+        elif n[0] in ("and", "or"):
+            fields = {c[1] for c in n[1] if c[0] == "is"}
+            if n[0] == "or" and len(fields) == 1 and len(n[1]) > 1:
+                feats.add("list")
+            for c in n[1]:
+                walk(c)
+    walk(ast)
+    return feats
+
+
+def retrieve_elk(index: BM25Index, text: str, target: str, source: str,
+                 budget: int = BUDGET_CHARS) -> Retrieved:
+    picked: dict[str, Chunk] = {}
+    trace: list[str] = []
+    syntax = [h for h in index.search(text, lang="elk", k=len(index.chunks))
+              if h.chunk.kind == "language"]
+    for h in syntax[:ELK_SYNTAX_CHUNKS]:
+        picked.setdefault(h.chunk.id, h.chunk)
+        trace.append(f"Elastic syntax: BM25 {h.score:.1f} -> {h.chunk.id}")
+    if not syntax:                     # no shared words: the start of the syntax reference
+        for c in [c for c in index.chunks if c.lang == "elk" and c.kind == "language"][
+                :ELK_SYNTAX_CHUNKS]:
+            picked.setdefault(c.id, c)
+            trace.append(f"Elastic syntax: start of the reference -> {c.id}")
+    for name in dict.fromkeys(_DOTTED.findall(text)):
+        for h in index.search(name, lang="elk", k=10):
+            if h.chunk.kind == "ecs-fields" and f" {name} " in f" {h.chunk.text} ":
+                picked.setdefault(h.chunk.id, h.chunk)
+                trace.append(f"ECS field '{name}' -> {h.chunk.id}")
+                break
+    if source == "elk" and target in ELK_TARGET_NAMES:
+        wanted = ELK_TARGET_NAMES[target]
+        names = list(wanted.get("base", []))
+        for f in sorted(elk_features(text)):
+            names += wanted.get(f, [])
+        for n in dict.fromkeys(names):
+            for c in index.by_name(n, target, k=1):
+                picked.setdefault(c.id, c)
+                trace.append(f"{target.upper()} '{n}' (name match) -> {c.id}")
+    elif target != "elk":
+        for h in index.search(text, lang=target, k=TOP_TARGET_PER_STAGE):
+            picked.setdefault(h.chunk.id, h.chunk)
+            trace.append(f"{target.upper()}: BM25 {h.score:.1f} -> {h.chunk.id}")
+    docs, used = [], 0
+    for c in picked.values():
+        if used + c.chars > budget:
+            trace.append(f"budget: skipped {c.id}")
+            continue
+        used += c.chars
+        docs.append({"source": c.url, "lang": c.lang, "title": c.title,
+                     "section": c.section, "names": c.names, "text": c.text})
+    return Retrieved(docs, trace)
+
+
 # ---- loading (once per process) -------------------------------------------------------
 
 _INDEX: dict[str, BM25Index] = {}
