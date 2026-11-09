@@ -229,6 +229,15 @@ pytest -q
    retrieve.retrieve_elk (Kibana syntax chunks + the ECS definition of each dotted field +
    for ELK -> KQL/XQL/SPL the target operators each construct becomes). llm.retrieve keeps
    elk.REFERENCE first and adds these when the index is built.
+16. DONE Rule bridge (retrieve.rule_bridge): SPL name -> the target names siemx's rules emit,
+   found by running each rule on a probe (RULE_PROBES), minus null guards; functions keep
+   only the function. Merged with the official bridge (Options.use_rule_bridge, default on);
+   spl_names reports eval concatenation as ".". This reverses the earlier decision not to
+   build a bridge from our own rules: it makes the AI's docs match what the rules do, but on
+   rag/eval.jsonl it is OPTIMISTIC (cases and rules come from the same doc reading), so
+   `docs eval` prints the official-only numbers first, and `--ablation` / `--reverse` show
+   both. Measured (2026-11-09, hybrid): SPL->KQL hit 0.625 -> 0.958, SPL->XQL 0.75 -> 1.0,
+   XQL->SPL 0.45 -> 1.0, KQL->SPL 0.958 -> 1.0. Real check: the pilot's detections.
 
 ## Open questions (need a human with access)
 - Elastic: index patterns per sourcetype and the ECS field names in use (field_map.json "elk").

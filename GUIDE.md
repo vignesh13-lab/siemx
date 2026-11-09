@@ -675,7 +675,8 @@ siemx docs build             # split into searchable pieces -> rag/index/
 siemx docs embed             # optional vector search (needs: pip install -e ".[rag]")
 siemx docs search "count distinct" --lang kql             # try a search
 siemx docs retrieve "index=a | stats dc(user)" --to kql   # what the AI would be given
-siemx docs eval              # measure how well the right pages are found
+siemx docs eval              # measure how well the right pages are found (first line:
+                             # official bridge only; then with siemx's own rule bridge)
 ```
 
 **Verified examples (gold).** Checked SPL -> KQL/XQL pairs in `gold/pairs.jsonl`:
