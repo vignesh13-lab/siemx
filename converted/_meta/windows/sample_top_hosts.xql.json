@@ -2,23 +2,29 @@
   "src": "detections/spl/windows/sample_top_hosts.spl",
   "source": "spl",
   "client": null,
-  "mappings_hash": "d82d2f094bce8204",
+  "mappings_hash": "660ed5bd65ff9fda",
   "src_hash": "6b8ea45158ffe582",
-  "converter": "21",
+  "converter": "22",
   "target": "xql",
   "status": "needs-review",
   "complexity": "simple",
   "model": null,
   "cached": false,
-  "ts": 1794132888,
-  "query_sha": "5dfb71afc9c7afc8",
+  "ts": 1794237432,
+  "query_sha": "eb23e3083c23fb35",
   "confidence": 0.9,
   "method": "rules",
   "warnings": [
-    "XQL: no field list for xdr_data in mappings/fields.json; field names not verified: host"
+    "XQL: field 'host' mapped to agent_hostname (conditional: Splunk host = the machine that sent the event; agent_hostname = the source machine; differs for forwarded events); verify",
+    "XQL: no field list for xdr_data in mappings/fields.json; field names not verified: agent_hostname"
   ],
   "tokens": 0,
   "validator": "name check against the official reference",
-  "field_map": {},
+  "field_map": {
+    "host": {
+      "to": "agent_hostname",
+      "level": "conditional"
+    }
+  },
   "no_rule": null
 }
