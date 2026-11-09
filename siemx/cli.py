@@ -86,6 +86,13 @@ def main():
     ps.add_argument("-n", type=int, default=50)
     ps.add_argument("--seed", type=int, default=7)
 
+    mp = sub.add_parser("mappings", help="data-source mapping (mappings/sources.json)")
+    msub = mp.add_subparsers(dest="mappings_cmd", required=True)
+    mm = msub.add_parser("missing", parents=[client],
+                         help="Splunk sources the detections use that are not mapped yet")
+    mm.add_argument("--write", action="store_true",
+                    help="add them to sources.json with EDIT_ME_ placeholders to fill in")
+
     fl = sub.add_parser("fields", help="field mapping (mappings/field_map.json)")
     fsub = fl.add_subparsers(dest="fields_cmd", required=True)
     fi = fsub.add_parser("import-props",
@@ -127,6 +134,8 @@ def main():
         return
     if a.cmd == "fields":
         return _fields(a)
+    if a.cmd == "mappings":
+        return _mappings(a)
     if a.cmd == "validate":
         from . import validate
         print(json.dumps(validate.status()))
@@ -163,6 +172,31 @@ def main():
                   f"  method={m.get('method')}")
             for w in m.get("warnings") or []:
                 print(f"    - {w}")
+
+
+def _mappings(a):
+    from . import mappings
+    config.set_client(a.client)
+    files = sorted(config.SRC_DIR.rglob("*.spl"))
+    missing = mappings.missing_sources(files)
+    if not missing:
+        print("every Splunk source in detections/spl is mapped")
+        return
+    for label, used in sorted(missing.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        name = mappings.placeholder_entry(label)["kql"]
+        print(f"{len(used):4}  {label:45} -> {name}")
+        for f in used[:5]:
+            print(f"        {f.relative_to(config.SRC_DIR).as_posix()}")
+        if len(used) > 5:
+            print(f"        ... and {len(used) - 5} more")
+    if a.write:
+        cdir = config.client_dir()
+        path = (cdir / "sources.json") if cdir else config.MAP_FILE
+        added = mappings.write_placeholders(list(missing), path)
+        print(f"added {len(added)} placeholder entries to {path}: replace each EDIT_ME_ "
+              "value with the real table / dataset / index pattern")
+    else:
+        print("run with --write to add them to sources.json as EDIT_ME_ placeholders")
 
 
 def _fields(a):

@@ -100,12 +100,12 @@ def test_first_stage_maps_known_source(sources_map):
     assert rules.first_stage("INDEX=WinEventLog", "kql") == "SecurityEvent"
 
 
-@pytest.mark.parametrize("stage", [
-    "index=unknown",
-    "search index=wineventlog",
-])
-def test_first_stage_unmapped_returns_none(sources_map, stage):
-    assert rules.first_stage(stage, "kql") is None
+def test_first_stage_without_metadata_returns_none(sources_map):
+    assert rules.first_stage("search index=wineventlog", "kql") is None
+
+
+def test_first_stage_unmapped_uses_a_placeholder(sources_map):
+    assert rules.first_stage("index=unknown", "kql") == "EDIT_ME_unknown"
 
 
 def test_first_stage_unknown_target(sources_map):
@@ -114,4 +114,4 @@ def test_first_stage_unknown_target(sources_map):
 
 def test_first_stage_missing_mapping_file(tmp_path, monkeypatch):
     monkeypatch.setattr(rules, "MAP_FILE", tmp_path / "nope.json")
-    assert rules.first_stage("index=wineventlog", "kql") is None
+    assert rules.first_stage("index=wineventlog", "kql") == "EDIT_ME_wineventlog"

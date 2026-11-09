@@ -151,6 +151,70 @@ def match_source(meta: dict, target: str):
     return table_text, (None if dropped in (None, "*") else dropped), "/".join(by)
 
 
+# ---- unmapped sources: editable placeholders ----------------------------------------------------
+# A Splunk source without a sources.json entry (e.g. sourcetype=wineventlog, which holds
+# every Windows channel) still converts by rules. The table is a placeholder that keeps the
+# Splunk name, e.g. EDIT_ME_wineventlog / dataset = EDIT_ME_wineventlog, and the output is
+# flagged. Replace it in the output, or once in mappings/sources.json
+# (`siemx mappings missing --write` adds the entries with these placeholders).
+
+PLACEHOLDER = "EDIT_ME_"
+W_PLACEHOLDER = ("{T}: no {kind} is mapped for {meta}; the query uses the placeholder {name}. "
+                 "Replace it here, or set it once in mappings/sources.json")
+
+
+def source_label(meta: dict) -> str:
+    """The Splunk source a detection names, without a client index when a sourcetype or
+    source says more: 'sourcetype=wineventlog', 'index=proxy'."""
+    keys = [k for k in ("sourcetype", "source") if k in meta]
+    if not keys and meta.get("index") not in (None, "*"):
+        keys = ["index"]
+    return " ".join(f"{k}={meta[k]}" for k in keys) or "index=*"
+
+
+_META_TERM = re.compile(r'(?i)\b(sourcetype|source|index)\s*=\s*("([^"]*)"|[^\s()|"]+)')
+
+
+def placeholder_name(meta: dict, stage: str = "") -> str:
+    """EDIT_ME_<the Splunk name as written in the detection>."""
+    key, value = source_label(meta).split(" ")[0].split("=", 1)
+    for m in _META_TERM.finditer(stage):               # keep the detection's own spelling
+        written = m.group(3) if m.group(3) is not None else m.group(2)
+        if m.group(1).lower() == key and written.lower() == value:
+            value = written
+            break
+    return PLACEHOLDER + (re.sub(r"[^A-Za-z0-9_]", "_", value).strip("_") or "any")
+
+
+def placeholder_for(meta: dict, target: str, stage: str = "") -> str:
+    name = placeholder_name(meta, stage)
+    return f"dataset = {name}" if target == "xql" else name
+
+
+def unmapped_source(spl: str, target: str) -> tuple[str, dict] | None:
+    """(placeholder table text, metadata) when the base search names a source that
+    sources.json does not map; None when it is mapped or names none."""
+    from . import search, triage
+    stage = triage.split_stages(spl)[0]
+    try:
+        meta, _ = search.parse(stage)
+    except search._Unsupported:
+        meta = {m.group(1).lower(): (m.group(3) if m.group(3) is not None else m.group(2)).lower()
+                for m in _META_TERM.finditer(stage)}
+    if not meta or match_source(meta, target) is not None:
+        return None
+    return placeholder_for(meta, target, stage), meta
+
+
+def placeholder_warnings(meta: dict, table_text: str, target: str) -> list[str]:
+    m = re.search(rf"{PLACEHOLDER}\w*", table_text or "")
+    if not m:
+        return []
+    kind = {"kql": "table", "xql": "dataset", "elk": "index pattern"}.get(target, "table")
+    return [W_PLACEHOLDER.format(T=target.upper(), kind=kind, meta=source_label(meta),
+                                 name=m.group())]
+
+
 def first_stage(stage: str, target: str):
     """Base search -> table/dataset (mappings) + filter (search.py).
 
@@ -164,11 +228,14 @@ def first_stage(stage: str, target: str):
     if not meta:
         return None
     matched = match_source(meta, target)
-    if matched is None:
+    if matched is None and target not in ("kql", "xql"):
         return None
-    table_text, dropped_index, by = matched
+    if matched is None:                    # unmapped: an editable placeholder, never a guess
+        table_text, dropped_index, by = placeholder_for(meta, target, stage), None, ""
+    else:
+        table_text, dropped_index, by = matched
     table = schema.table_of(table_text, target)
-    warnings, reads, text = [], [], table_text
+    warnings, reads, text = placeholder_warnings(meta, table_text, target), [], table_text
     if dropped_index:
         warnings.append(INDEX_DROPPED_WARNING.format(T=target.upper(), index=dropped_index, by=by))
     if ast is not None:

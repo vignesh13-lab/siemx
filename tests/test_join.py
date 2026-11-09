@@ -122,7 +122,6 @@ def test_join_effects(two_sources):
     f"join type=right host {STATS_SUB}",
     f"join left=L right=R where L.a=R.b {STATS_SUB}",
     f"join host {STATS_SUB} | head 5",
-    "join host [search index=unknown | stats count by host]",     # unmapped source
     'join host [search index=proxy | rex "(?<a>x)" | stats count by host]',
     "join host [search index=proxy | stats count by host",         # unbalanced
     f"join host, host {STATS_SUB}",

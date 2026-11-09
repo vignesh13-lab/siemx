@@ -123,7 +123,9 @@ def test_review_warnings(elk_sources):
 def test_unmapped_source_still_converts_but_is_flagged(workspace):
     r = spl_to_elk("index=X sourcetype=Y EventCode=4688")
     assert r["query"] == "EventCode: 4688"
-    assert r["warnings"][0].startswith("ELK: no index pattern for index=x sourcetype=y")
+    assert r["index"] == "EDIT_ME_Y"
+    assert r["warnings"][0].startswith("ELK: no index pattern is mapped for sourcetype=y; the "
+                                       "query uses the placeholder EDIT_ME_Y")
 
 
 def test_display_stages_are_dropped_with_a_warning(elk_sources):

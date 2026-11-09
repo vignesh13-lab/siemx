@@ -85,6 +85,10 @@ def convert_query(spl: str, target: str) -> dict:
     # 2) LLM + RAG fallback; the validator's exact errors go back to the model
     out = llm_with_retry(spl, target)
     out["no_rule"] = missing_rules(spl, target)
+    unmapped = rules.unmapped_source(spl, target)      # the prompt told the model to use it
+    if unmapped and out.get("query"):
+        out.setdefault("warnings", [])[:0] = rules.placeholder_warnings(
+            unmapped[1], unmapped[0], target)
     return out
 
 
