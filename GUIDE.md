@@ -326,7 +326,8 @@ The workflow `convert-detections` runs on GitHub:
 3. A reviewer reads the PR, then merges it. The run's summary page shows the status counts.
 
 Note: GitHub's servers cannot reach a model on your PC (Ollama). There, AI fallback needs a
-hosted model (section 9); without one, those detections are simply marked unsupported.
+hosted model (section 9). For no AI at all, set the repository variable
+`SIEMX_PROVIDER` to `none` (rules-only mode, below).
 
 ## 9. Choosing the AI model
 
@@ -338,6 +339,13 @@ The model is a setting, not code:
 | `SIEMX_MODEL` | `qwen2.5-coder:7b` | for example `claude-sonnet-5-5` |
 | `SIEMX_BASE_URL` | (default) | `openai` only: the API address |
 | key | none | a secret (`ANTHROPIC_API_KEY` or `SIEMX_API_KEY`), never in a file |
+
+**No AI at all (rules-only mode):** `siemx convert --no-ai`, or `SIEMX_PROVIDER=none`.
+Everything except the AI fallback works the same: rules, mappings, placeholders,
+validators, review and report. A query the rules cannot convert is **unsupported** with the
+stages that stopped it, for example *"the rules cannot convert `transaction` (rules-only
+mode, AI is off)"*. Those are not retried on every run; they are tried again only when
+an AI model is turned on. Nothing leaves the PC.
 
 On a laptop these are environment variables. On GitHub they are repository
 **variables** (Settings -> Secrets and variables -> Actions), and keys are **secrets**.
@@ -369,7 +377,11 @@ Per-client mappings are only for exceptions.
 the 50-detection pilot. That measures real accuracy and shows which missing rules matter
 most.
 
-**Is our data sent anywhere?** With the local model (Ollama): no. With a paid API, only
+**Can we use it without AI?** Yes: `siemx convert --no-ai` (section 9). Rules convert
+what they can; the rest is marked unsupported with the reason, and `siemx report` ranks
+the missing rules worth building.
+
+**Is our data sent anywhere?** With the local model (Ollama) or without AI: no. With a paid API, only
 detections that need the AI are sent, as text, to that provider; get approval for that
 first. Rule-based conversion never sends anything.
 

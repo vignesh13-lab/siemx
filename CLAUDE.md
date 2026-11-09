@@ -217,6 +217,11 @@ pytest -q
    the meta index) and flags it. The LLM prompt names the placeholder when later stages need
    the model. `siemx mappings missing [--write]` lists / adds EDIT_ME_ entries; any
    EDIT_ME_ value in sources.json stays flagged until replaced. CONVERTER_VERSION 22.
+14. DONE Rules-only mode: SIEMX_PROVIDER=none or `siemx convert --no-ai`. llm_with_retry
+   returns an unsupported {"rules_only": True} result without calling a model;
+   process_file writes W_RULES_ONLY naming the stages (no_rule, counted). Meta keeps
+   rules_only, so the result is skipped while AI stays off and re-tried once a provider is
+   set (is_current).
 
 ## Open questions (need a human with access)
 - Elastic: index patterns per sourcetype and the ECS field names in use (field_map.json "elk").

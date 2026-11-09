@@ -24,6 +24,8 @@ def main():
     c.add_argument("--workers", type=int, default=None,
                    help="parallel conversions (default 4; 1 with ollama, which runs one request at a time)")
     c.add_argument("--force", action="store_true")
+    c.add_argument("--no-ai", action="store_true",
+                   help="rules only: never call an AI model (same as SIEMX_PROVIDER=none)")
     c.add_argument("--path", help="only convert detections/spl/<path>/** (e.g. a client folder)")
     c.add_argument("--from", dest="source", choices=["spl", "kql", "xql", "elk"],
                    default="spl",
@@ -151,7 +153,12 @@ def main():
     config.set_client(a.client)
     if a.cmd == "convert":
         from . import llm
-        if not llm.configured():
+        if a.no_ai:
+            os.environ["SIEMX_PROVIDER"] = "none"
+        if llm.rules_only():
+            print("note: rules-only mode (no AI). Queries without a rule are marked "
+                  "unsupported with the command that has no rule.", file=sys.stderr)
+        elif not llm.configured():
             print(f"note: {llm.NO_MODEL}. Queries that need the AI will be marked "
                   "unsupported and retried on the next run.", file=sys.stderr)
         allowed = {"spl": ("kql", "xql", "elk"), "kql": ("spl", "elk"),
