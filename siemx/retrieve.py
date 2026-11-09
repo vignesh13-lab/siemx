@@ -119,14 +119,88 @@ _FUNC = re.compile(r"\b([a-z_][a-z0-9_]*)\s*\(")
 
 def spl_names(stage: str) -> list[str]:
     """Command of a stage plus function names used in it: 'eval x=strftime(_time,...)'
-    -> ['eval', 'strftime']."""
+    -> ['eval', 'strftime']. The string concatenation operator counts as the name '.'."""
     from .triage import command_of
     cmd = command_of(stage)
     names = [cmd] if cmd else []
     for f in _FUNC.findall(stage.lower()):
         if f not in names:
             names.append(f)
+    if cmd == "eval" and _CONCAT.search(_without_strings(stage)):
+        names.append(".")
     return names
+
+
+_CONCAT = re.compile(r"\s\.\s")
+
+
+def _without_strings(text: str) -> str:
+    return re.sub(r'"(?:[^"\\]|\\.)*"', '""', text)
+
+
+# ---- the rule bridge -----------------------------------------------------------------------
+# SPL name -> the target operators/functions siemx's own rules emit for it, found by running
+# each rule on a small probe (so it can never disagree with the rules; every rule cites the
+# official docs it was checked against). It closes the vocabulary gap the official bridge
+# leaves (dc -> count_distinctif, "." -> strcat / concat).
+
+RULE_PROBES = {
+    "stats": "stats count by b", "eval": "eval a = 1", "where": "where a = 1",
+    "table": "table a", "fields": "fields a", "rename": "rename a AS b", "dedup": "dedup a",
+    "head": "head 5", "sort": "sort - a", "top": "top 5 a", "rex": 'rex field=a "(?<b>x+)"',
+    "timechart": "timechart span=1h count", "lookup": "lookup t a OUTPUT b",
+    "dc": "stats dc(a) as n by b", "distinct_count": "stats distinct_count(a) as n by b",
+    "sum": "stats sum(a) as n by b", "avg": "stats avg(a) as n by b",
+    "min": "stats min(a) as n by b", "max": "stats max(a) as n by b",
+    "lower": "eval x = lower(a)", "upper": "eval x = upper(a)", "len": "eval x = len(a)",
+    "coalesce": "eval x = coalesce(a, b)", "if": 'eval x = if(a = 1, "y", "n")',
+    ".": 'eval x = a . "@" . b',
+}
+# null guards and options the rules add around the real translation
+RULE_GUARDS = {"where", "isnotempty", "filter", "leftouter", "left", "_getwatchlist",
+               "to_string"}
+# operators that only hold a function (for a function probe, the function is the answer)
+RULE_HOLDERS = {"extend", "alter", "summarize", "comp", "count"}
+RULE_FUNCTIONS = {"dc", "distinct_count", "sum", "avg", "min", "max", "lower", "upper", "len",
+                  "coalesce", "if", "."}
+_RULE_BRIDGE: dict[str, dict[str, list[str]]] = {}
+
+
+def rule_bridge(target: str) -> dict[str, list[str]]:
+    if target in _RULE_BRIDGE:
+        return _RULE_BRIDGE[target]
+    from . import rules
+    from .reverse import split_pipes
+    out: dict[str, list[str]] = {}
+    for spl_name, probe in RULE_PROBES.items():
+        try:
+            emitted = rules.stage(probe, target)
+        except Exception:                                   # a probe the rules reject
+            emitted = None
+        if emitted is None:
+            continue
+        names: list[str] = []
+        for st in split_pipes(str(emitted)):
+            for n in (kql_names(st) if target == "kql" else xql_names(st)):
+                if n not in names:
+                    names.append(n)
+        if spl_name in RULE_FUNCTIONS:
+            main = [n for n in names if n not in RULE_GUARDS | RULE_HOLDERS]
+        else:
+            main = [n for n in names if n not in RULE_GUARDS] or names[:1]   # where -> where
+        if main:
+            out[spl_name] = main
+    _RULE_BRIDGE[target] = out
+    return out
+
+
+def merged_bridge(official: dict[str, list[str]], extra: dict[str, list[str]]) -> dict:
+    out = {k: list(v) for k, v in official.items()}
+    for k, v in extra.items():
+        for n in v:
+            if n not in out.setdefault(k, []):
+                out[k].append(n)
+    return out
 
 
 @dataclass
@@ -140,6 +214,9 @@ class Options:
     """Switches for the ablation study (`siemx docs eval --ablation`)."""
     skip_base: bool = True        # do not search docs for the base search (rules handle it)
     use_bridge: bool = True       # official SPL -> target name map (bridge.json)
+    use_rule_bridge: bool = True  # SPL -> target names that siemx's own rules emit
+                                  # (rule_bridge). On the eval set this is optimistic: the
+                                  # cases and the rules come from the same doc reading.
     expansion_chars: int = 0      # SPL description text added to the hop-2 query (0 = off:
                                   # it hurt on the real corpus, see `docs eval --ablation`)
     mode: str = "hybrid"          # "bm25" | "vector" | "hybrid"; hybrid won the ablation and
@@ -183,6 +260,12 @@ def xql_names(stage: str) -> list[str]:
     return names
 
 
+def _bridge_for(index, lang: str, opts) -> dict[str, list[str]]:
+    """SPL -> `lang` names: the official bridge and/or the rule bridge (Options)."""
+    official = index.bridge.get(lang, {}) if opts.use_bridge else {}
+    return merged_bridge(official, rule_bridge(lang)) if opts.use_rule_bridge else official
+
+
 def invert_bridge(bridge: dict[str, list[str]]) -> dict[str, list[str]]:
     """{'stats': ['summarize']} -> {'summarize': ['stats']} (for KQL -> SPL)."""
     out: dict[str, list[str]] = {}
@@ -206,7 +289,7 @@ def retrieve(index: BM25Index, spl: str, target: str, budget: int = BUDGET_CHARS
     if source == "kql":
         from .reverse import split_pipes
         stages = split_pipes(spl)
-        bridge = invert_bridge(index.bridge.get("kql", {})) if opts.use_bridge else {}
+        bridge = invert_bridge(_bridge_for(index, "kql", opts))
         names_of = kql_names
     elif source == "xql":
         from .reverse import split_pipes
@@ -214,11 +297,11 @@ def retrieve(index: BM25Index, spl: str, target: str, budget: int = BUDGET_CHARS
         while body and xql_names(body[0])[:1] in (["config"], ["dataset"]):
             body = body[1:]
         stages = ["<config/dataset>"] + body      # index 0 = the head, skipped like a base search
-        bridge = {}                               # no usable official XQL bridge (see below)
+        bridge = invert_bridge(_bridge_for(index, "xql", opts))   # no official XQL bridge
         names_of = xql_names
     else:
         stages = split_stages(spl)
-        bridge = index.bridge.get(target, {}) if opts.use_bridge else {}
+        bridge = _bridge_for(index, target, opts)
         names_of = spl_names
     S = source.upper()
     for i, st in enumerate(stages):
@@ -411,7 +494,8 @@ def get_index(chunks_file: Path) -> BM25Index | None:
 # functions to KQL ones. Parsed into {"kql": {spl_name: [kql_names]}}. It is an
 # independent official source; the eval labels come from this project's rules, so
 # using the bridge is not evaluation leakage. The Cortex "Translate to XQL" table is
-# malformed (SPL pipes break the Markdown cells), so there is no XQL bridge.
+# malformed (SPL pipes break the Markdown cells), so there is no official XQL bridge; the
+# rule bridge (rule_bridge) covers XQL, with the eval caveat noted there.
 
 _CODE = re.compile(r"`([^`]+)`")
 

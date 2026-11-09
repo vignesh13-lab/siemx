@@ -304,9 +304,11 @@ def _docs(a):
             raise SystemExit("no index: run `siemx docs fetch` and `siemx docs build` first")
         if a.reverse:
             from . import gold
-            configs = [("bm25, no bridge", rag.Options(use_bridge=False, mode="bm25")),
+            configs = [("bm25, no bridge", rag.Options(use_bridge=False,
+                                                         use_rule_bridge=False, mode="bm25")),
                        ("bm25 + bridge", rag.Options(mode="bm25"))]
             if index.vec is not None:
+                configs.append(("hybrid, no rule bridge", rag.Options(use_rule_bridge=False)))
                 configs.append(("hybrid (default)", rag.Options()))
             for src in ("kql", "xql"):
                 rcases = rag_eval.reverse_cases(gold.load(), src)
@@ -331,18 +333,20 @@ def _docs(a):
         cases = rag_eval.load_cases(docs.rag_dir() / "eval.jsonl")
         if a.ablation:
             configs = [
-                ("v0 first version", rag.Options(skip_base=False, use_bridge=False, expansion_chars=600, mode="bm25")),
-                ("+ skip base search", rag.Options(skip_base=True, use_bridge=False, expansion_chars=600, mode="bm25")),
-                ("+ short expansion", rag.Options(skip_base=True, use_bridge=False, expansion_chars=200, mode="bm25")),
-                ("+ no expansion", rag.Options(skip_base=True, use_bridge=False, expansion_chars=0, mode="bm25")),
-                ("+ bridge, expansion", rag.Options(expansion_chars=200, mode="bm25")),
-                ("+ bridge, no expansion", rag.Options(expansion_chars=0, mode="bm25")),
+                ("v0 first version", rag.Options(skip_base=False, use_bridge=False, use_rule_bridge=False, expansion_chars=600, mode="bm25")),
+                ("+ skip base search", rag.Options(skip_base=True, use_bridge=False, use_rule_bridge=False, expansion_chars=600, mode="bm25")),
+                ("+ short expansion", rag.Options(skip_base=True, use_bridge=False, use_rule_bridge=False, expansion_chars=200, mode="bm25")),
+                ("+ no expansion", rag.Options(skip_base=True, use_bridge=False, use_rule_bridge=False, expansion_chars=0, mode="bm25")),
+                ("+ bridge, expansion", rag.Options(expansion_chars=200, use_rule_bridge=False, mode="bm25")),
+                ("+ bridge, no expansion", rag.Options(expansion_chars=0, use_rule_bridge=False, mode="bm25")),
+                ("+ rule bridge (bm25)", rag.Options(expansion_chars=0, mode="bm25")),
             ]
             if index.vec is not None:
                 configs += [
                     ("vector only", rag.Options(mode="vector")),
-                    ("hybrid (BM25+vector)", rag.Options(mode="hybrid")),
-                    ("hybrid + best per name", rag.Options(mode="hybrid", per_name_best=True)),
+                    ("hybrid (BM25+vector)", rag.Options(mode="hybrid", use_rule_bridge=False)),
+                    ("hybrid + best per name", rag.Options(mode="hybrid", per_name_best=True, use_rule_bridge=False)),
+                    ("hybrid + rule bridge", rag.Options(mode="hybrid", per_name_best=True)),
                 ]
             else:
                 print("(no vector index: run `siemx docs embed` to add vector/hybrid rows)")
@@ -354,6 +358,11 @@ def _docs(a):
                       f"{x['hit']:8.3f} {x['recall']:7.3f} {x['mrr']:6.3f}")
             return
         from . import gold
+        official = rag_eval.evaluate(index, cases, lambda i, s, t: rag.retrieve(
+            i, s, t, opts=rag.Options(use_rule_bridge=False)))
+        for t, r in official.items():
+            print(f"{t.upper()}: docs, official bridge only  hit={r['hit']} recall={r['recall']} "
+                  f"mrr={r['mrr']}")
         rep = rag_eval.evaluate(index, cases, rag.retrieve)
         exa = rag_eval.evaluate_examples(gold.load(), cases)
         for t, r in rep.items():

@@ -77,7 +77,7 @@ def test_vector_mode_uses_spl_description_as_query(vindex):
     index = retrieve.BM25Index(CHUNKS)
     index.vec = vindex
     res = retrieve.retrieve(index, "index=x | transaction host", "kql",
-                            opts=retrieve.Options(mode="vector"))
+                            opts=retrieve.Options(mode="vector", use_rule_bridge=False))
     assert "row-window-session#0" in " ".join(d["source"] for d in res.docs)
     assert any("vector" in t and "via SPL 'transaction'" in t for t in res.trace)
 
@@ -113,7 +113,7 @@ def test_per_name_best_is_added_after_fused_results(vindex):
 def test_vector_mode_without_index_falls_back_quietly():
     index = retrieve.BM25Index(CHUNKS)                    # index.vec is None
     res = retrieve.retrieve(index, "index=x | stats count", "kql",
-                            opts=retrieve.Options(mode="vector"))
+                            opts=retrieve.Options(mode="vector", use_rule_bridge=False))
     assert all(d["lang"] == "spl" for d in res.docs)      # only hop-1 SPL docs
 
 

@@ -126,7 +126,7 @@ def test_bridge_adds_target_docs_by_name():
     res = retrieve.retrieve(idx, "index=x | stats dc(user)", "kql")
     assert "stage 1: bridge -> KQL 'summarize' -> kql/summarize-operator#0" in res.trace
     no = retrieve.retrieve(idx, "index=x | stats dc(user)", "kql",
-                           opts=retrieve.Options(use_bridge=False))
+                           opts=retrieve.Options(use_bridge=False, use_rule_bridge=False))
     assert not any("bridge" in t for t in no.trace)
 
 
