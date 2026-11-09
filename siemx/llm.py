@@ -2,7 +2,9 @@
 
 The model is a setting (environment variables, read at call time), not code:
 
-  SIEMX_PROVIDER  anthropic (default) | ollama | openai
+  SIEMX_PROVIDER  anthropic (default) | ollama | openai | none
+                  none = rules-only mode: no AI; queries without a rule are unsupported
+                  (also `siemx convert --no-ai`)
   SIEMX_MODEL     model name; required for ollama / openai
                     anthropic: default claude-sonnet-5-5, key in ANTHROPIC_API_KEY
                     ollama:    e.g. qwen2.5-coder:7b (local, no key, nothing leaves the PC)
@@ -29,7 +31,7 @@ from pathlib import Path
 from . import config
 
 MODEL = os.environ.get("SIEMX_MODEL") or "claude-sonnet-5-5"     # anthropic default
-PROVIDERS = ("anthropic", "ollama", "openai")
+PROVIDERS = ("anthropic", "ollama", "openai", "none")
 DEFAULT_URLS = {"ollama": "http://localhost:11434", "openai": "https://api.openai.com/v1"}
 
 
@@ -314,6 +316,14 @@ def parse_json(text: str) -> dict:
 
 NO_MODEL = ("no AI model configured: set SIEMX_PROVIDER and SIEMX_MODEL (for example "
             "ollama and qwen2.5-coder:7b) or ANTHROPIC_API_KEY; see GUIDE.md section 9")
+
+
+def rules_only() -> bool:
+    """SIEMX_PROVIDER=none (or `siemx convert --no-ai`): never call a model."""
+    try:
+        return settings()["provider"] == "none"
+    except ValueError:
+        return False
 
 
 def default_workers() -> int:

@@ -149,7 +149,12 @@ def xql_case_mode(q: str, warnings: list[str]) -> tuple[str, list[str]]:
 
 
 def llm_with_retry(text: str, target: str, source: str = "spl", base: str | None = None) -> dict:
-    """LLM translation, validated; the exact problems go back to the model (MAX_RETRIES)."""
+    """LLM translation, validated; the exact problems go back to the model (MAX_RETRIES).
+    Rules-only mode: no model call; the caller's no_rule list goes into the warning
+    (process_file)."""
+    if llm.rules_only():
+        return {"query": "", "confidence": 0.0, "method": "rules", "unsupported": True,
+                "warnings": [], "tokens": 0, "rules_only": True}
     out = llm.translate(text, target, source=source, base=base)
     out["method"] = "llm"
     for _ in range(MAX_RETRIES):
@@ -205,11 +210,29 @@ def is_current(meta_path, src_hash: str, map_hash: str) -> bool:
     m = json.loads(meta_path.read_text())
     if any(str(w).startswith(LLM_FAILED) for w in m.get("warnings") or []):
         return False
+    if m.get("rules_only") and not llm.rules_only():
+        return False                     # AI turned on again: try the gaps with the model
     return (m.get("src_hash") == src_hash and m.get("converter") == config.CONVERTER_VERSION
             and m.get("mappings_hash") == map_hash)
 
 
 LLM_FAILED = "LLM step failed"
+W_RULES_ONLY = ("not converted: the rules cannot convert {gaps} (rules-only mode, AI is off). "
+                "Convert it by hand, or run again with an AI model to let it try")
+
+
+def rules_only_gaps(no_rule: list[str]) -> str:
+    """['search', 'eval', 'eval', 'stats'] -> 'the base search, `eval` (2 stages), `stats`'."""
+    if not no_rule:
+        return "this query"
+    counts = {}
+    for g in no_rule:
+        counts[g] = counts.get(g, 0) + 1
+    parts = []
+    for g, n in counts.items():
+        text = "the base search" if g == "search" else f"`{g}`"
+        parts.append(f"{text} ({n} stages)" if n > 1 else text)
+    return ", ".join(parts)
 
 
 SOURCES = {"spl": ".spl", "kql": ".kql", "xql": ".xql", "elk": ".elk"}     # input language -> file extension
@@ -269,6 +292,9 @@ def process_file(path, targets, force, map_hash=None, source="spl"):
             results.append({"file": shown, "target": t, "status": "skipped"})
             continue
         res = convert_any(spl, t, source)
+        if res.get("rules_only"):
+            gaps = rules_only_gaps(res.get("no_rule") or [])
+            res["warnings"] = [W_RULES_ONLY.format(gaps=gaps)] + list(res.get("warnings") or [])
         st = status_for(res)
         out_file = config.OUT_DIR / t / rel / f"{name}{config.EXT[t]}"
         out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -283,7 +309,8 @@ def process_file(path, targets, force, map_hash=None, source="spl"):
                 "ts": int(time.time()), "query_sha": sha(res.get("query", "")),
                 **{k: res.get(k) for k in ("confidence", "method", "warnings", "tokens",
                                            "validator", "field_map", "no_rule")},
-                **({"index": res["index"]} if res.get("index") else {})}
+                **({"index": res["index"]} if res.get("index") else {}),
+                **({"rules_only": True} if res.get("rules_only") else {})}
         meta_path.write_text(json.dumps(meta, indent=2))
         results.append({"file": shown, "target": t, "status": st})
     return results

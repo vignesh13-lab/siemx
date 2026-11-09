@@ -33,6 +33,7 @@ THRESHOLDS = (0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95)
 # warning text -> category (first match wins); keeps the report readable
 CATEGORIES = [
     ("LLM not available / failed", r"^LLM step failed"),
+    ("no rule could convert it (rules-only mode)", r"rules-only mode, AI is off"),
     ("no translation produced", r"^validation: empty output"),
     ("preview function (dc)", r"count_distinctif\(\) \(exact\) is a preview"),
     ("field mapping: conditional", r"mapped to .* \(conditional"),
