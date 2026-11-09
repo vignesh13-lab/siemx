@@ -79,10 +79,13 @@ def retrieve(spl: str, target: str, source: str = "spl") -> dict:
     from . import docs, gold
     from . import retrieve as rag
     if "elk" in (target, source):
-        # no Elastic docs in the RAG index: one page covers the language (elk.REFERENCE)
+        # elk.REFERENCE (siemx's short summary of the syntax) always; official Elastic
+        # excerpts (Kibana KQL, ECS fields, target docs) when the index is built
         from .elk import REFERENCE
         examples = gold.examples_for_prompt(spl, target, k=EXAMPLES_K) if source == "spl" else []
-        return {"docs": [REFERENCE], "examples": examples, "field_map": {}}
+        index = rag.get_index(docs.index_dir() / "chunks.jsonl")
+        found = rag.retrieve_elk(index, spl, target, source).docs if index is not None else []
+        return {"docs": [REFERENCE] + found, "examples": examples, "field_map": {}}
     examples = gold.examples_for_prompt(spl, target, k=EXAMPLES_K, source=source)
     fields = field_hints(spl, target) if source == "spl" else {}
     index = rag.get_index(docs.index_dir() / "chunks.jsonl")

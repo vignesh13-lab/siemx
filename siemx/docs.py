@@ -11,6 +11,9 @@ Sources (official only):
   KQL  MicrosoftDocs/dataexplorer-docs on GitHub (Markdown), cited as learn.microsoft.com
   XQL  Cortex XQL command reference (pages are served as Markdown with a .md suffix)
   SPL  help.splunk.com SPL search reference 9.4 (HTML, converted to Markdown here)
+  ELK  Elastic's own Markdown sources on GitHub, cited as elastic.co/docs:
+       Kibana KQL (elastic/elasticsearch, elastic/docs-content), Elastic Security rule
+       types (elastic/docs-content), ECS field sets (elastic/ecs)
 """
 from __future__ import annotations
 
@@ -36,6 +39,34 @@ KQL_CITE = "https://learn.microsoft.com/en-us/kusto/query/{slug}"
 XQL_INDEX = "https://cortex-docs.paloaltonetworks.com/sitemap.md"
 XQL_PAGE = re.compile(r"https://cortex-docs\.paloaltonetworks\.com/xql-command-reference-guide/"
                       r"readme/(stages|functions)/([a-z0-9_-]+)\.md")
+ELK_RAW = "https://raw.githubusercontent.com/{repo}/main/{path}"
+ELK_CITE = "https://www.elastic.co/docs/{path}"
+ELK_PAGES = [   # (repo, path in repo, cited path, kind): the query language and rule types
+    ("elastic/elasticsearch", "docs/reference/query-languages/kql.md",
+     "reference/query-languages/kql", "language"),
+    ("elastic/docs-content", "explore-analyze/query-filter/languages/kql.md",
+     "explore-analyze/query-filter/languages/kql", "language"),
+    ("elastic/docs-content", "solutions/security/detect-and-alert/rule-types.md",
+     "solutions/security/detect-and-alert/rule-types", "rules"),
+    ("elastic/docs-content", "solutions/security/detect-and-alert/custom-query.md",
+     "solutions/security/detect-and-alert/custom-query", "rules"),
+    ("elastic/docs-content", "solutions/security/detect-and-alert/threshold.md",
+     "solutions/security/detect-and-alert/threshold", "rules"),
+]
+ECS_TREE = "https://api.github.com/repos/elastic/ecs/git/trees/main?recursive=1"
+ECS_NOT_FIELD_SETS = re.compile(   # guide pages in docs/reference/, not field sets
+    r"ecs-(additional-information|allowed-values-.*|category-field-values-reference|"
+    r"contributing|conventions|converting|custom-fields-in-ecs|faq|field-reference|"
+    r"getting-started|guidelines|mapping-network-events|opentelemetry|otel-.*|"
+    r"principles-.*|products-solutions|.*-usage|using-.*)")
+# Substitutions used by Elastic's docs ({{kib}} ...), from elastic/docs-content docset.yml.
+# An unknown one is replaced by its own name.
+ELK_SUBS = {"kib": "Kibana", "es": "Elasticsearch", "esql": "ES|QL", "stack": "Elastic Stack",
+            "elastic-sec": "Elastic Security", "security-app": "Elastic Security app",
+            "data-source": "data view", "agent": "Elastic Agent", "fleet": "Fleet",
+            "ml": "machine learning", "ech": "Elastic Cloud Hosted",
+            "serverless-full": "Elastic Cloud Serverless",
+            "es-serverless": "Elasticsearch Serverless", "ecs": "ECS"}
 SPL_BASE = "https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/9.4/"
 SPL_SECTIONS = {   # index page -> kind
     "search-commands": "command",
@@ -124,8 +155,26 @@ def discover_spl(get=http_get) -> list[dict]:
     return out
 
 
+def discover_elk(get=http_get) -> list[dict]:
+    """Kibana KQL + rule-type pages (fixed list) and every ECS field-set page."""
+    out = [{"lang": "elk", "kind": kind, "slug": cite.rsplit("/", 1)[1] + (
+                "-overview" if "explore-analyze" in cite else ""),
+            "fetch_url": ELK_RAW.format(repo=repo, path=path),
+            "cite_url": ELK_CITE.format(path=cite)}
+           for repo, path, cite, kind in ELK_PAGES]
+    tree = json.loads(get(ECS_TREE))
+    for item in tree["tree"]:
+        m = re.fullmatch(r"docs/reference/(ecs-[a-z0-9_-]+)\.md", item["path"])
+        if not m or ECS_NOT_FIELD_SETS.fullmatch(m.group(1)) or m.group(1) == "ecs-ecs":
+            continue
+        out.append({"lang": "elk", "kind": "ecs-fields", "slug": m.group(1),
+                    "fetch_url": ELK_RAW.format(repo="elastic/ecs", path=item["path"]),
+                    "cite_url": ELK_CITE.format(path=f"reference/ecs/{m.group(1)}")})
+    return out
+
+
 def discover(get=http_get) -> list[dict]:
-    sources = discover_spl(get) + discover_kql(get) + discover_xql(get)
+    sources = discover_spl(get) + discover_kql(get) + discover_xql(get) + discover_elk(get)
     sources.sort(key=lambda s: (s["lang"], s["kind"], s["slug"]))
     return sources
 
@@ -220,7 +269,44 @@ def clean(source: dict, body: str) -> str:
         body = re.sub(r"\A> For the complete documentation index.*?\n\n", "", body, flags=re.S)
     if source["lang"] == "kql":
         body = clean_ms_markdown(body)
+    if source["lang"] == "elk":
+        body = clean_elastic_markdown(body)
     return body.strip() + "\n"
+
+
+def clean_elastic_markdown(body: str) -> str:
+    """Elastic docs Markdown (MyST) -> plain Markdown: front matter (description kept),
+    % comments, {{substitutions}}, $$$anchor$$$ marks, heading ids [id], :::{note}
+    directives, inline {applies_to} roles, links (text kept), <br> in tables."""
+    desc = ""
+    m = re.match(r"\A---\n(.*?)\n---\n", body, re.S)
+    if m:
+        d = re.search(r"^description:\s*(.+)$", m.group(1), re.M)
+        desc = d.group(1).strip() if d else ""
+        body = body[m.end():]
+    lines = []
+    for line in body.splitlines():
+        s = line.strip()
+        if s.startswith("%"):
+            continue                                          # MyST comment
+        n = re.match(r"^:{3,}\s*\{(\w+)\}", s)
+        if n:                                                 # :::{note} -> "NOTE:"
+            if n.group(1) in ("note", "tip", "important", "warning", "admonition"):
+                lines.append(n.group(1).upper() + ":")
+            continue
+        if re.fullmatch(r":{3,}", s):
+            continue
+        line = re.sub(r"\{applies_to\}`[^`]*`", "", line).rstrip()       # inline role
+        line = re.sub(r"^(#{1,6} .+?)\s+\[[\w-]+\]\s*$", r"\1", line)   # heading id
+        lines.append(line)
+    text = "\n".join(lines)
+    text = re.sub(r"\{\{([\w-]+)\}\}", lambda x: ELK_SUBS.get(x.group(1), x.group(1)), text)
+    text = re.sub(r"\$\$\$[\w-]+\$\$\$\s*", "", text)
+    text = re.sub(r"(?<!!)\[([^\]]+)\]\([^)\s]+\)", r"\1", text)          # links -> text
+    text = re.sub(r"(<br>)+", " ", text)
+    if desc:
+        text = re.sub(r"\A(\s*# [^\n]+\n)", lambda x: f"{x.group(1)}\n{desc}\n", text, count=1)
+    return re.sub(r"\n{3,}", "\n\n", text)
 
 
 def clean_ms_markdown(body: str) -> str:
