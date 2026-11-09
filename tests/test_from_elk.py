@@ -127,7 +127,7 @@ def test_field_names_through_the_splunk_field_map(sources):
     assert where(conv("event.code: 4625", "kql")) == "EventID == 4625"
     r = conv("event.code: 4625", "xql")
     assert r["query"].endswith("filter action_evtlog_event_id = 4625")
-    assert "mapped to action_evtlog_event_id (Windows events)" in text_of(r)
+    assert "mapped to action_evtlog_event_id (conditional: Windows events)" in text_of(r)
 
 
 @pytest.mark.parametrize("q, reason", [
