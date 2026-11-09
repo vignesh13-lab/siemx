@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 200" width="640" height="200" role="img" aria-label="siemx: SIEM detection converter">
+  <title>siemx: SIEM detection converter</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1F33"/>
+      <stop offset="1" stop-color="#12304D"/>
+    </linearGradient>
+    <linearGradient id="arrowA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2DD4BF"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+    <linearGradient id="arrowB" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#F59E0B"/>
+      <stop offset="1" stop-color="#F472B6"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="640" height="200" rx="28" fill="url(#bg)"/>
+
+  <!-- the mark: query brackets around a two-colour X (one language crossing into another) -->
+  <g transform="translate(40 30)">
+    <rect x="0" y="0" width="140" height="140" rx="30" fill="#0E2A44" stroke="#1E4A70" stroke-width="2"/>
+    <path d="M34 34 H22 V106 H34" fill="none" stroke="#CBD5E1" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M106 34 H118 V106 H106" fill="none" stroke="#CBD5E1" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M48 44 L92 96" fill="none" stroke="url(#arrowA)" stroke-width="13" stroke-linecap="round"/>
+    <path d="M48 96 L92 44" fill="none" stroke="url(#arrowB)" stroke-width="13" stroke-linecap="round"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="212" y="104" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="72" font-weight="700" fill="#F8FAFC" letter-spacing="1">siem<tspan fill="#38BDF8">x</tspan></text>
+  <text x="215" y="140" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="17" fill="#94A3B8" letter-spacing="0.5">SPL · KQL · XQL · Elastic: detection conversion</text>
+</svg>
