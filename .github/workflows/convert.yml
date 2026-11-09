@@ -42,7 +42,7 @@ jobs:
           SIEMX_BASE_URL: ${{ vars.SIEMX_BASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SIEMX_API_KEY: ${{ secrets.SIEMX_API_KEY }}
-        run: siemx convert --workers 4 ${SIEMX_PATH:+--path "$SIEMX_PATH"} | tee run.jsonl
+        run: siemx convert --to kql,xql,elk --workers 4 ${SIEMX_PATH:+--path "$SIEMX_PATH"} | tee run.jsonl
       - name: Summary
         run: |
           echo "### siemx status ${SIEMX_CLIENT:-(shared mappings)}" >> "$GITHUB_STEP_SUMMARY"
