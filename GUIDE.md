@@ -629,6 +629,8 @@ compared on the same pilot. Get approval before sending detections to a cloud AI
 
 ## 14. Running it on GitHub automatically
 
+The full guide to the bot (triggers, the bot branch, reviewing its pull requests, settings, troubleshooting) is [BOT.md](BOT.md). In short:
+
 The repository has a workflow called **convert-detections**:
 
 1. Someone merges a change to `detections/spl/` or `mappings/` (or starts it by hand:
