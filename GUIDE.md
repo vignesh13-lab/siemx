@@ -639,8 +639,8 @@ repository **variables** `SIEMX_PROVIDER` / `SIEMX_MODEL`, and keys as **secrets
 the variable `SIEMX_PROVIDER` to `none` for rules only. GitHub cannot reach Ollama on
 your PC.
 
-The workflow converts to KQL and XQL. To include Elastic, change `siemx convert` in
-`.github/workflows/convert.yml` to `siemx convert --to kql,xql,elk`.
+The workflow converts to KQL, XQL and Elastic (`--to kql,xql,elk` in
+`.github/workflows/convert.yml`).
 
 ## 15. Checking a single query
 
