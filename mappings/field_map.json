@@ -274,7 +274,7 @@
         "Token_Elevation_Type": {
           "to": "winlog.event_data.TokenElevationType",
           "level": "conditional",
-          "note": "raw EventData value (%%1936 / %%1937 / %%1938); Splunk classic logs show 'TokenElevationTypeFull (2)': rewrite values; verify"
+          "note": "raw EventData value (%%1936 / %%1937 / %%1938); Splunk classic logs show 'TokenElevationTypeFull (2)', so rewrite the values"
         },
         "Mandatory_Label": {
           "to": "winlog.event_data.MandatoryLabel",

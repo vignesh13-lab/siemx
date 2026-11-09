@@ -90,7 +90,7 @@ def field_names(table: str, lang: str, index: str | None) -> tuple[dict, list[st
             out[c] = e["to"]
             if e["level"] == "conditional":
                 warnings.append(f"ELK: field '{c}' mapped to {e['to']} "
-                                f"({e.get('note', 'conditional')}); verify")
+                                f"(conditional: {e.get('note', '')}); verify")
     return out, warnings
 
 

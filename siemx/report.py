@@ -159,7 +159,7 @@ def missing_rules_section(metas: list[dict]) -> str:
         for cmd in set(m.get("no_rule") or []):
             c[cmd] += 1
     rows = [[f"`{cmd}`", n] for cmd, n in c.most_common()]
-    return (_table(["SPL command without a rule", "queries it sent to the LLM"], rows)
+    return (_table(["SPL command without a rule", "queries it stopped"], rows)
             if rows else "_Every query was handled by rules._")
 
 
@@ -262,7 +262,7 @@ def build(mkdocs: bool = False) -> tuple[str, str]:
            "## Summary per source", "", summary_section(metas) if metas else "_Nothing converted yet._", "",
            "## Why outputs need review", "", warnings_section(metas), "",
            "## SPL commands without a rule", "",
-           "Each row is a rule that, once written, moves these queries from the LLM to rules.", "",
+           "Each row is a rule that, once written, converts these queries by rules (no AI needed).", "",
            missing_rules_section(metas), "",
            "## Review results (pilot)", "", reviews_section(metas, reviewed), "",
            "## Auto-approval threshold for LLM output", "", threshold_section(metas, reviewed), ""]

@@ -399,7 +399,7 @@ class _Render:
         level = e.get("level")
         if level in ("exact", "conditional") and e.get("to"):
             if level == "conditional":
-                w = f"ELK: field '{f}' mapped to {e['to']} ({e.get('note', 'conditional')}); verify"
+                w = f"ELK: field '{f}' mapped to {e['to']} (conditional: {e.get('note', '')}); verify"
                 if w not in self.warnings:
                     self.warnings.append(w)
             self.applied[f] = e["to"]

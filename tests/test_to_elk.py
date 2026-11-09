@@ -128,7 +128,7 @@ def test_field_names_through_the_splunk_field_map(sources):
             "user": {"to": "user.name", "level": "conditional", "note": "logon events"}}}}}))
     r = to('SecurityEvent | where EventID == 4625 and user == "x"', "kql")
     assert r["query"] == 'event.code: 4625 and user.name: "x"'
-    assert "field 'user' mapped to user.name (logon events)" in text_of(r)
+    assert "field 'user' mapped to user.name (conditional: logon events)" in text_of(r)
     assert "field names kept" not in text_of(r)
 
 
