@@ -37,6 +37,49 @@ def split_stages(spl: str) -> list[str]:
     return [s for s in stages if s]
 
 
+def strip_comments(spl: str) -> str:
+    """Remove Splunk inline comments (```...```), never inside a quoted string. An
+    unterminated ``` is left as it is (the search would fail in Splunk too)."""
+    out, i, quote = [], 0, None
+    while i < len(spl):
+        ch = spl[i]
+        if quote:
+            out.append(ch)
+            if ch == "\\" and i + 1 < len(spl):
+                out.append(spl[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch == '"':
+            quote = ch
+            out.append(ch)
+        elif spl.startswith("```", i):
+            end = spl.find("```", i + 3)
+            if end == -1:
+                out.append(spl[i:])
+                break
+            out.append(" ")
+            i = end + 3
+            continue
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def normalize_spl(spl: str) -> str:
+    """The same search in the form the rules read: comments removed, and an explicit
+    `search` command at the start dropped (`search a=1` and `| search a=1` mean `a=1`).
+    A generating command at the start (`| tstats ...`) is kept as written."""
+    spl = strip_comments(spl).strip()
+    body = spl[1:].lstrip() if spl.startswith("|") else spl
+    m = re.match(r"(?i)search\s+", body)
+    if m:
+        return body[m.end():]
+    return spl
+
+
 def command_of(stage: str) -> str:
     m = re.match(r"\s*(\w+)", stage)
     return m.group(1).lower() if m else ""

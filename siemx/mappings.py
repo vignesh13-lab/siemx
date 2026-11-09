@@ -59,7 +59,7 @@ def missing_sources(files: list[Path]) -> dict[str, list[Path]]:
     from . import rules, triage
     out: dict[str, list[Path]] = {}
     for f in files:
-        spl = expand_macros(f.read_text(encoding="utf-8"))
+        spl = triage.normalize_spl(expand_macros(triage.normalize_spl(f.read_text(encoding="utf-8"))))
         hit = rules.unmapped_source(spl, "kql")
         if hit is None:
             continue
