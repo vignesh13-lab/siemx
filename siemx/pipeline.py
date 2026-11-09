@@ -63,7 +63,7 @@ def apply_field_map(spl: str, parts: list, target: str) -> tuple[str, list, list
 
 
 def convert_query(spl: str, target: str) -> dict:
-    spl = mappings.expand_macros(spl)        # client/shared Splunk macros
+    spl = triage.normalize_spl(mappings.expand_macros(triage.normalize_spl(spl)))   # comments, leading `search`; macros
     if target == "elk":
         return convert_elk(spl)
     # 1) rules first

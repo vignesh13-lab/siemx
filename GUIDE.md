@@ -3,7 +3,9 @@
 This guide assumes **no prior knowledge**. It explains what siemx is, how to install it,
 how to convert your detections, how to read the results, and every command it has.
 If you only have 10 minutes, read [section 1](#1-what-siemx-does-in-plain-words) and
-[section 5](#5-your-first-conversion-step-by-step).
+[section 5](#5-your-first-conversion-step-by-step). How to write the input files in detail
+(every language, what each rule accepts, how to rewrite the rest):
+[INPUT_FILES.md](INPUT_FILES.md).
 
 ## Contents
 
@@ -265,6 +267,9 @@ Rules for the files:
   `mappings/macros.json` (section 8).
 - If your detections are stored another way (Splunk `savedsearches.conf`, YAML), export
   each search to a `.spl` file first. siemx has no importer for those formats yet.
+- A leading `search` and Splunk comments (```` ```...``` ````) are fine.
+- Every form each command accepts, and how to rewrite the rest:
+  [INPUT_FILES.md](INPUT_FILES.md).
 
 ### Converting 1,000 detections
 

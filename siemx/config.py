@@ -25,7 +25,7 @@ CONF_AUTO_APPROVE = 0.85   # at or above this -> auto-approved
 LLM_AUTO_APPROVE = False
 
 # Bump whenever rules/prompts change output, so unchanged SPL is re-converted.
-CONVERTER_VERSION = "22"   # 22: unmapped sources -> EDIT_ME_ placeholders (rules, not LLM)
+CONVERTER_VERSION = "23"   # 23: SPL comments and a leading `search` command are accepted
 
 
 def set_client(name: str | None) -> None:

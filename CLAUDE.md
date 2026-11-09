@@ -238,6 +238,10 @@ pytest -q
    `docs eval` prints the official-only numbers first, and `--ablation` / `--reverse` show
    both. Measured (2026-11-09, hybrid): SPL->KQL hit 0.625 -> 0.958, SPL->XQL 0.75 -> 1.0,
    XQL->SPL 0.45 -> 1.0, KQL->SPL 0.958 -> 1.0. Real check: the pilot's detections.
+17. DONE SPL input normalisation (triage.normalize_spl, converter 23): ```comments``` removed
+   (not inside quotes), a leading `search` / `| search` dropped; `| tstats` etc. kept.
+   INPUT_FILES.md documents every input language: what each rule accepts (verified by
+   probing the rules) and how to rewrite the rest. Keep it in step when rules change.
 
 ## Open questions (need a human with access)
 - Elastic: index patterns per sourcetype and the ECS field names in use (field_map.json "elk").
